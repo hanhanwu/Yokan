@@ -6,6 +6,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from openpyxl.styles import Alignment
 
 
@@ -36,18 +37,30 @@ def upload_to_google_drive(df, folder_id, output_filename):
     TOKEN_FILE = os.path.join(GCP_DIR, "token.pickle")
     CREDENTIALS_FILE = os.path.join(GCP_DIR, "drive_auth.json")
 
+    def _run_oauth_flow():
+        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+        creds = flow.run_local_server(port=0, access_type='offline', prompt='consent')
+        os.makedirs(GCP_DIR, exist_ok=True)
+        with open(TOKEN_FILE, 'wb') as f:
+            pickle.dump(creds, f)
+        return creds
+
     creds = None
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, 'rb') as f:
             creds = pickle.load(f)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+                with open(TOKEN_FILE, 'wb') as f:
+                    pickle.dump(creds, f)
+            except RefreshError:
+                print("Refresh token invalid; re-authorizing...")
+                os.remove(TOKEN_FILE)
+                creds = _run_oauth_flow()
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, 'wb') as f:
-            pickle.dump(creds, f)
+            creds = _run_oauth_flow()
 
     service = build('drive', 'v3', credentials=creds)
 
