@@ -325,3 +325,60 @@ review_rag_system_template: |
     Your output should follow this format:
     {format_instructions}
 # ------------------------------------------ REVIEW RAG SYSTEM ------------------------------------------ #
+
+
+# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
+compare_2rags_template_v1: |
+    ### RESPONSIBILITIES ###
+        You're an expert of RAG system.
+        You're responsible for comparing 2 RAG pipelines built by LlamaIndex tools, RAG1 and RAG2, and explain the reasons behind the difference of their performance.
+        
+    ### INSTRUCTIONS ###
+        * Compare RAG1_SETTINGS and RAG2_SETTINGS, find out the differences in their system design.
+        * Look at RAG1_RETRIEVAL_QUALITY_SCORE_AND_REASONS and RAG2_RETRIEVAL_QUALITY_SCORE_AND_REASONS, analyze the reasons behind their retrieval quality performance.
+        * Look at RAG1_ANSWER_QUALITY_SCORE_AND_REASONS and RAG2_ANSWER_QUALITY_SCORE_AND_REASONS, analyze the reasons behind their answer quality performance.
+        * Then explain the potential root causes of the diferences of their performance.
+        * For cases with answer quality score in [0, 1, 2], explain the potential root causes.
+
+    ### OUTPUT FORMAT ###
+        {{
+            "score_difference_root_causes": "Explanation of potential root causes of score differences between RAG1 and RAG2",
+            "lower_answer_quality_root_causes": "Explanation of potential root causes of answer quality scores in [0, 1, 2] in RAG1 or RAG2",
+        }}
+        - Make sure the text in score_difference_root_causes is brief but comprehensive, less than 50 tokens if you can.
+        - Make sure lower_answer_quality_root_causes is brief but comprehensive, less than 50 tokens if you can.
+
+    ### EXAMPLE OUTPUT ###
+        {{
+            "score_difference_root_causes": "RAG 2 uses better LLM for answer genration, that's why answer quality got higher score.",
+            "lower_answer_quality_root_causes": "The LLM used for answer generation is limited."
+        }}
+
+        {{
+            "score_difference_root_causes": "RAG 1 uses better embedding more and higher weights for semantic search, that's why its retrieval quality is higher.
+                                             But its answer quality is lower can be caused by the randoness of the LLM used for answer generation.",
+            "lower_answer_quality_root_causes": "The attention mechanism in the LLM has higher randomness."
+        }}
+
+
+    Here is the RAG1_SETTINGS:
+    {rag1_settings}
+
+    Here is the RAG1_RETRIEVAL_QUALITY_SCORE_AND_REASONS:
+    {rag1_rq_score_and_reasons}
+
+    Here is the RAG1_ANSWER_QUALITY_SCORE_AND_REASONS:
+    {rag1_aq_score_and_reasons}
+
+    Here is the RAG2_SETTINGS:
+    {rag2_settings}
+
+    Here is the RAG2_RETRIEVAL_QUALITY_SCORE_AND_REASONS:
+    {rag2_rq_score_and_reasons}
+
+    Here is the RAG2_ANSWER_QUALITY_SCORE_AND_REASONS:
+    {rag2_aq_score_and_reasons}
+
+    Your output should follow this format:
+    {format_instructions}
+# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #

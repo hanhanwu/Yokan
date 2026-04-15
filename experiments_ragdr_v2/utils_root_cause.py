@@ -480,3 +480,51 @@ async def review_rag_system_async(llm, avg_rq_score, rq_reasons, avg_aq_score, a
     })
     return result
 # ------------------------------------------ REVIEW RAG SYSTEM ------------------------------------------ #
+
+
+# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
+class Compare2RAGs_v1(BaseModel):
+    score_difference_root_causes: str = Field(description="Explain potential root causes of RAG's score differences.")
+    lower_answer_quality_root_causes: str = Field(description="Explain potential root causes of lower answer quality scores.")
+
+
+async def compare_2rags_async_v1(llm, rag1_settings, rag1_rq_score_and_reasons, rag1_aq_score_and_reasons,
+                                rag2_settings, rag2_rq_score_and_reasons, rag2_aq_score_and_reasons):
+    base_parser = PydanticOutputParser(pydantic_object=Compare2RAGs_v1)
+    output_parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
+    prompt = PromptTemplate(
+        template=prompt_versions['compare_2rags_template_v1'],
+        input_variables=["rag1_settings", "rag1_rq_score_and_reasons", "rag1_aq_score_and_reasons",
+                         "rag2_settings", "rag2_rq_score_and_reasons", "rag2_aq_score_and_reasons"],
+        partial_variables={"format_instructions": output_parser.get_format_instructions()},
+    )
+    chain = prompt | llm | output_parser
+    result = await _invoke_with_retry(chain, {
+        "rag1_settings": rag1_settings, "rag1_rq_score_and_reasons": rag1_rq_score_and_reasons, "rag1_aq_score_and_reasons": rag1_aq_score_and_reasons,
+        "rag2_settings": rag2_settings, "rag2_rq_score_and_reasons": rag2_rq_score_and_reasons, "rag2_aq_score_and_reasons": rag2_aq_score_and_reasons
+    })
+    return result
+
+
+async def process_compare_2rags_record_async_v1(llm, record):
+    result = await compare_2rags_async_v1(
+        llm,
+        record['rag1_settings'], record['rag1_rq_score_and_reasons'], record['rag1_aq_score_and_reasons'],
+        record['rag2_settings'], record['rag2_rq_score_and_reasons'], record['rag2_aq_score_and_reasons'],
+    )
+    record['score_difference_root_causes'] = result.score_difference_root_causes
+    record['lower_answer_quality_root_causes'] = result.lower_answer_quality_root_causes
+    return record
+
+
+async def run_compare_2rags_async_v1(input_df, llm, concurrency=2):
+    sem = asyncio.Semaphore(concurrency)
+
+    async def sem_task(record):
+        async with sem:
+            return await process_compare_2rags_record_async_v1(llm, record)
+
+    input_records = input_df.to_dict(orient='records')
+    output_lst = await asyncio.gather(*[sem_task(record) for record in input_records])
+    return pd.DataFrame(output_lst)
+# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
