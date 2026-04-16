@@ -482,10 +482,9 @@ async def review_rag_system_async(llm, avg_rq_score, rq_reasons, avg_aq_score, a
 # ------------------------------------------ REVIEW RAG SYSTEM ------------------------------------------ #
 
 
-# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
+# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND, sattistically better ------------------------------------------ #
 class Compare2RAGs_v1(BaseModel):
-    score_difference_root_causes: str = Field(description="Explain potential root causes of RAG's score differences.")
-    lower_answer_quality_root_causes: str = Field(description="Explain potential root causes of lower answer quality scores.")
+    lessons_learned: str = Field(description="Explain potential reasons of 2RAG's performance differences.")
 
 
 async def compare_2rags_async_v1(llm, rag1_settings, rag1_rq_score_and_reasons, rag1_aq_score_and_reasons,
@@ -512,8 +511,7 @@ async def process_compare_2rags_record_async_v1(llm, record):
         record['rag1_settings'], record['rag1_rq_score_and_reasons'], record['rag1_aq_score_and_reasons'],
         record['rag2_settings'], record['rag2_rq_score_and_reasons'], record['rag2_aq_score_and_reasons'],
     )
-    record['score_difference_root_causes'] = result.score_difference_root_causes
-    record['lower_answer_quality_root_causes'] = result.lower_answer_quality_root_causes
+    record['lessons_learned'] = result.lessons_learned
     return record
 
 
