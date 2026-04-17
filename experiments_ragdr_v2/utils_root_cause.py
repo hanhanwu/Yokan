@@ -518,6 +518,41 @@ async def run_compare_2rags_v1(input_df, llm, concurrency=2):
 # ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
 
 
+# ------------------------------------------ WHY LOWER SCORE  ------------------------------------------ #
+class WhyLowerScore_v1(BaseModel):
+    insights: str = Field(description="Explain potential root causes of why answer quality score didn't reach 3.")
+
+_WHY_LOWER_SCORE_V1_FIELDS = [
+    "rag_settings", "rag_rq_score_and_reasons", "rag_aq_score_and_reasons",
+]
+
+async def why_lower_score_async_v1(llm, record):
+    base_parser = PydanticOutputParser(pydantic_object=WhyLowerScore_v1)
+    output_parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
+    prompt = PromptTemplate(
+        template=prompt_versions['why_lower_score_template_v1'],
+        input_variables=_WHY_LOWER_SCORE_V1_FIELDS,
+        partial_variables={"format_instructions": output_parser.get_format_instructions()},
+    )
+    chain = prompt | llm | output_parser
+    return await _invoke_with_retry(chain, {k: record[k] for k in _WHY_LOWER_SCORE_V1_FIELDS})
+
+
+async def run_why_lower_score_v1(input_df, llm, concurrency=2):
+    sem = asyncio.Semaphore(concurrency)
+
+    async def sem_task(record):
+        async with sem:
+            result = await why_lower_score_async_v1(llm, record)
+            record['insights'] = result.insights
+            return record
+
+    input_records = input_df.to_dict(orient='records')
+    output_lst = await asyncio.gather(*[sem_task(record) for record in input_records])
+    return pd.DataFrame(output_lst)
+# ------------------------------------------ WHY LOWER SCORE  ------------------------------------------ #
+
+
 # ------------------------------------------ SUMMARIZE PATTERNS ------------------------------------------ #
 class SummarizePatterns(BaseModel):
     patterns: list[str] = Field(description="Summarize the patterns from given text.")

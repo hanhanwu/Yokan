@@ -327,11 +327,11 @@ review_rag_system_template: |
 # ------------------------------------------ REVIEW RAG SYSTEM ------------------------------------------ #
 
 
-# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND, sattistically better ------------------------------------------ #
+# ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND, statistically better ------------------------------------------ #
 compare_2rags_template_v1: |
     ### RESPONSIBILITIES ###
         You're an expert of RAG system, reviewing 2 RAGs pipelines, RAG2 is statistically better than RAG1.
-        You're responsible for summarize useful lessons learned about the perforamnce difference between RAG1 and RAG2.
+        You're responsible for finding useful lessons learned about the performance difference between RAG1 and RAG2.
         
     ### INSTRUCTIONS ###
         * Compare RAG1_SETTINGS and RAG2_SETTINGS, find out the differences in their system design.
@@ -377,6 +377,46 @@ compare_2rags_template_v1: |
     Your output should follow this format:
     {format_instructions}
 # ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
+
+
+# ------------------------------------------ WHY LOWER SCORE ------------------------------------------ #
+why_lower_score_template_v1: |
+    ### RESPONSIBILITIES ###
+        You're an expert of RAG system, reviewing a RAG pipeline's settings and performance analysis.
+        You're responsible for finding useful insights about why the performance didn't reach the highest score.
+        
+    ### INSTRUCTIONS ###
+        * Look at RETRIEVAL_QUALITY_SCORE_AND_REASONS and ANSWER_QUALITY_SCORE_AND_REASONS, understand the reasons behind their retrieval and answer quality performance.
+        * Summarize the potential reasons why answer quality score didn't reach 3.
+
+    ### OUTPUT FORMAT ###
+        {{
+            "insights": "Explanation of potential root causes of why answer quality score didn't reach 3",
+        }}
+        - Make sure the text in insights is brief but comprehensive, less than 100 tokens if you can.
+
+    ### EXAMPLE OUTPUT ###
+        {{
+            "insights": "The retrieval quality has some score 1 and 0, which means some retrieved documents are not relevant to the user query, which can cause the low answer quality score.",
+        }}
+
+        {{
+            "insights": "Although retrieval was good with score 3, the LLM used for answer generation is not good enough, which can cause the low answer quality score.",
+        }}
+
+
+    Here is the RAG_SETTINGS:
+    {rag_settings}
+
+    Here is the RAG_RETRIEVAL_QUALITY_SCORE_AND_REASONS:
+    {rag_rq_score_and_reasons}
+
+    Here is the RAG_ANSWER_QUALITY_SCORE_AND_REASONS:
+    {rag_aq_score_and_reasons}
+
+    Your output should follow this format:
+    {format_instructions}
+# ------------------------------------------ WHY LOWER SCORE  ------------------------------------------ #
 
 
 # ------------------------------------------ SUMMARIZE PATTERNS ------------------------------------------ #
