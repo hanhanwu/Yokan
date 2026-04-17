@@ -377,3 +377,32 @@ compare_2rags_template_v1: |
     Your output should follow this format:
     {format_instructions}
 # ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
+
+
+# ------------------------------------------ SUMMARIZE PATTERNS ------------------------------------------ #
+summarize_patterns_template: |
+    ### INSTRUCTIONS ###
+        - Given a list of text TEXT_LIST and which PATTERN_FOCUS to focus on, summarize the patterns that frequently appeared.
+        - Only choose the most frequent patterns, and each pattern can explain the PATTERN_FOCUS well.
+        - Sumamrize no more than 3 patterns, less patterns is better if they can cover the majority of the TEXT_LIST.
+        - Each pattern has its unique focus angle, avoid overlapping in the focus of each pattern.
+        - Each pattern in the list has *no more than 30 words*, brief but comprehensive.
+    
+    ### EXAMPLE OUTPUT ###
+        {{
+            "patterns": [
+                "RAG2 has higher semantic weights in retrieval, which leads to better retrieval quality.",
+                "RAG2 uses better embedding model, which leads to better retrieval quality.",
+                "RAG2 uses better LLM for answer generation, which leads to better answer quality."
+            ]
+        }}
+
+    Here's the TEXT_LIST:
+    {text_list}
+
+    Here's the PATTERN_FOCUS to focus on:
+    {pattern_focus}
+
+    Your output should follow this format:
+    {format_instructions}
+# ------------------------------------------ SUMMARIZE PATTERNS ------------------------------------------ #

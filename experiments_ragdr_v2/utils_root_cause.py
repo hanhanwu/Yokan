@@ -486,43 +486,52 @@ async def review_rag_system_async(llm, avg_rq_score, rq_reasons, avg_aq_score, a
 class Compare2RAGs_v1(BaseModel):
     lessons_learned: str = Field(description="Explain potential reasons of 2RAG's performance differences.")
 
+_COMPARE_2RAGS_V1_FIELDS = [
+    "rag1_settings", "rag1_rq_score_and_reasons", "rag1_aq_score_and_reasons",
+    "rag2_settings", "rag2_rq_score_and_reasons", "rag2_aq_score_and_reasons",
+]
 
-async def compare_2rags_async_v1(llm, rag1_settings, rag1_rq_score_and_reasons, rag1_aq_score_and_reasons,
-                                rag2_settings, rag2_rq_score_and_reasons, rag2_aq_score_and_reasons):
+async def compare_2rags_async_v1(llm, record):
     base_parser = PydanticOutputParser(pydantic_object=Compare2RAGs_v1)
     output_parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
     prompt = PromptTemplate(
         template=prompt_versions['compare_2rags_template_v1'],
-        input_variables=["rag1_settings", "rag1_rq_score_and_reasons", "rag1_aq_score_and_reasons",
-                         "rag2_settings", "rag2_rq_score_and_reasons", "rag2_aq_score_and_reasons"],
+        input_variables=_COMPARE_2RAGS_V1_FIELDS,
         partial_variables={"format_instructions": output_parser.get_format_instructions()},
     )
     chain = prompt | llm | output_parser
-    result = await _invoke_with_retry(chain, {
-        "rag1_settings": rag1_settings, "rag1_rq_score_and_reasons": rag1_rq_score_and_reasons, "rag1_aq_score_and_reasons": rag1_aq_score_and_reasons,
-        "rag2_settings": rag2_settings, "rag2_rq_score_and_reasons": rag2_rq_score_and_reasons, "rag2_aq_score_and_reasons": rag2_aq_score_and_reasons
-    })
-    return result
+    return await _invoke_with_retry(chain, {k: record[k] for k in _COMPARE_2RAGS_V1_FIELDS})
 
 
-async def process_compare_2rags_record_async_v1(llm, record):
-    result = await compare_2rags_async_v1(
-        llm,
-        record['rag1_settings'], record['rag1_rq_score_and_reasons'], record['rag1_aq_score_and_reasons'],
-        record['rag2_settings'], record['rag2_rq_score_and_reasons'], record['rag2_aq_score_and_reasons'],
-    )
-    record['lessons_learned'] = result.lessons_learned
-    return record
-
-
-async def run_compare_2rags_async_v1(input_df, llm, concurrency=2):
+async def run_compare_2rags_v1(input_df, llm, concurrency=2):
     sem = asyncio.Semaphore(concurrency)
 
     async def sem_task(record):
         async with sem:
-            return await process_compare_2rags_record_async_v1(llm, record)
+            result = await compare_2rags_async_v1(llm, record)
+            record['lessons_learned'] = result.lessons_learned
+            return record
 
     input_records = input_df.to_dict(orient='records')
     output_lst = await asyncio.gather(*[sem_task(record) for record in input_records])
     return pd.DataFrame(output_lst)
 # ------------------------------------------ COMPARE 2 RAGs WITHOUT BACKGROUND ------------------------------------------ #
+
+
+# ------------------------------------------ SUMMARIZE PATTERNS ------------------------------------------ #
+class SummarizePatterns(BaseModel):
+    patterns: list[str] = Field(description="Summarize the patterns from given text.")
+
+async def run_summarize_patterns(input_df, llm, text_col, pattern_focus):
+    base_parser = PydanticOutputParser(pydantic_object=SummarizePatterns)
+    output_parser = OutputFixingParser.from_llm(parser=base_parser, llm=llm)
+    prompt = PromptTemplate(
+        template=prompt_versions['summarize_patterns_template'],
+        input_variables=["text_list", "pattern_focus"],
+        partial_variables={"format_instructions": output_parser.get_format_instructions()},
+    )
+    chain = prompt | llm | output_parser
+    text_list = input_df[text_col].tolist()
+    result = await _invoke_with_retry(chain, {"text_list": text_list, "pattern_focus": pattern_focus})
+    return result.patterns
+# ------------------------------------------ SUMMARIZE PATTERNS ------------------------------------------ #
