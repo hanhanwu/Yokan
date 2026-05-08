@@ -9,6 +9,12 @@
   * Might be the best end-to-end eval tool so far, but for product like RAG, especailly when the problem is in golden dataset go stale, it lacks of intelligent detection --> requires more human review
   * It also has too much items to monitor/check --> overcomplex the solution
   * Just like all the other eval tools, it records all the traces, but then what?
+* Kiln AI
+  * More on synthetic data generation for testste
+  * Free desktop app, but still eval focus
+* Ragas Testet Generation 💛
+  * Try it: https://docs.ragas.io/en/stable/getstarted/rag_testset_generation/#generate-testset
+  * See whether I can implement better solution (cheaper, faster)
 
 
 ## What Makes RAG Doctor Unique
