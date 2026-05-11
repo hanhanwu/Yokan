@@ -14,6 +14,7 @@
   * Free desktop app, but still eval focus
 * Scale AI Data Labeling for Enterprise 💛
   * RAG needs continuous improvement, especially in highly regulated enterprise env, so its end-to-end eval system should enable the continuous update of knowledge base, golden dataset the evaluation
+    * Scale AI can't update the golden dataset every time when the knowledge base got updated --> better to have companies' internal experts to handle the work
   * Scale AI is using labor resources for labeling, had poor working condition scandles before, hiring US labelers is much more expensive --> companies can use its own domain experts, we provide efficient UI to allow them create golden dataset efficiently --> no ethical issues, no laid off concerns, make the most of human expertise
 * Ragas Testet Generation 💛
   * Try it: https://docs.ragas.io/en/stable/getstarted/rag_testset_generation/#generate-testset

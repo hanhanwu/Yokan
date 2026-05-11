@@ -208,3 +208,5 @@ __marimo__/
 
 # files and folders
 datasets/wix_docs/*
+datasets/enterpriseRAG_bench/questions.jsonl
+datasets/enterpriseRAG_bench/extra_questions.jsonl
