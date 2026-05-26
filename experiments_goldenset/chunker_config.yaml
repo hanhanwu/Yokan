@@ -6,14 +6,16 @@ docs_dir: "../datasets/wix_docs"
 # Add or remove entries freely; re-run generate_chunks.py to rebuild the frontend asset.
 configs:
   - name: "semantic chunking"
+    type: semantic
     embedding_model: "all-MiniLM-L6-v2"
     threshold: 0.8
     chunk_size: 2048
     similarity_window: 3
     skip_window: 0
 
-  - name: "Potion-32M · thr=0.8 · size=2048"
-    embedding_model: "all-MiniLM-L6-v2"
-    threshold: 0.8
-    chunk_size: 2048
-    skip_window: 3
+  - name: "Late Chunking · modernbert-embed-base"
+    type: late
+    embedding_model: "all-MiniLM-L6-v2" #"nomic-ai/modernbert-embed-base"
+    chunk_size: 256
+    min_characters_per_chunk: 24
+    # rules: RecursiveRules() is applied automatically for type: late

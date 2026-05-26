@@ -17,9 +17,15 @@ import sys
 import yaml
 
 try:
-    from chonkie import SemanticChunker
+    from chonkie import LateChunker, RecursiveRules, SemanticChunker
 except ImportError:
     sys.exit("chonkie not found – activate the project venv and run again.")
+
+# Map type string → chunker factory
+CHUNKER_TYPES = {
+    "semantic": lambda params: SemanticChunker(**params),
+    "late": lambda params: LateChunker(rules=RecursiveRules(), **params),
+}
 
 
 # ─── Paths (relative to this file's directory) ────────────────────────────────
@@ -71,9 +77,13 @@ def main():
     all_configs = []
     for cfg in config["configs"]:
         name = cfg["name"]
-        params = {k: v for k, v in cfg.items() if k != "name"}
-        print(f"▸ {name}")
-        chunker = SemanticChunker(**params)
+        chunker_type = cfg.get("type", "semantic")
+        params = {k: v for k, v in cfg.items() if k not in ("name", "type")}
+        print(f"▸ {name}  [{chunker_type}]")
+        factory = CHUNKER_TYPES.get(chunker_type)
+        if factory is None:
+            sys.exit(f"Unknown chunker type '{chunker_type}'. Valid: {list(CHUNKER_TYPES)}")
+        chunker = factory(params)
         raw_chunks = chunker.chunk(text)
         positions = find_positions(text, raw_chunks)
         all_configs.append({
