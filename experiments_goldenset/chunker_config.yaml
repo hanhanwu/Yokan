@@ -1,0 +1,19 @@
+# ─── Document to chunk ────────────────────────────────────────────────────────
+document: "0a6fd82793a145494170ae1896c53841d75a4eee743bfa818e3b0288e79ec5a3.txt"
+docs_dir: "../datasets/wix_docs"
+
+# ─── Chunker configurations ───────────────────────────────────────────────────
+# Add or remove entries freely; re-run generate_chunks.py to rebuild the frontend asset.
+configs:
+  - name: "semantic chunking"
+    embedding_model: "all-MiniLM-L6-v2"
+    threshold: 0.8
+    chunk_size: 2048
+    similarity_window: 3
+    skip_window: 0
+
+  - name: "Potion-32M · thr=0.8 · size=2048"
+    embedding_model: "all-MiniLM-L6-v2"
+    threshold: 0.8
+    chunk_size: 2048
+    skip_window: 3
