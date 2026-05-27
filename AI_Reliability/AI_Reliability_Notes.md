@@ -9,3 +9,7 @@
 * Generate/extract Logic Points: where agent takes actions/tools calls can affect above 3 goals
 * Ultimate goal is to do root cause analysis --> then able to fix/improve
 * Build solutions based on each company's priorities
+
+
+### 2026-05-27 Daily Sync
+* Voice agent test tool: https://hamming.ai/
