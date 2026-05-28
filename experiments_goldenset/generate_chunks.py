@@ -17,7 +17,7 @@ import sys
 import yaml
 
 try:
-    from chonkie import LateChunker, RecursiveRules, SemanticChunker
+    from chonkie import LateChunker, NeuralChunker, RecursiveRules, SemanticChunker, SentenceChunker
 except ImportError:
     sys.exit("chonkie not found – activate the project venv and run again.")
 
@@ -25,6 +25,8 @@ except ImportError:
 CHUNKER_TYPES = {
     "semantic": lambda params: SemanticChunker(**params),
     "late": lambda params: LateChunker(rules=RecursiveRules(), **params),
+    "sentence": lambda params: SentenceChunker(**params),
+    "neural": lambda params: NeuralChunker(**params),
 }
 
 

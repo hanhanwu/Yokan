@@ -19,3 +19,16 @@ configs:
     chunk_size: 256
     min_characters_per_chunk: 24
     # rules: RecursiveRules() is applied automatically for type: late
+
+  - name: "Sentence Chunking"
+    type: sentence
+    tokenizer: "character"
+    chunk_size: 2048
+    chunk_overlap: 128
+    min_sentences_per_chunk: 1
+
+  - name: "Neural Chunking · chonky_modernbert_base_1"
+    type: neural
+    model: "mirth/chonky_modernbert_base_1"
+    device_map: "cpu"
+    min_characters_per_chunk: 10

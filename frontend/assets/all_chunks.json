@@ -135,6 +135,109 @@
         }
       ],
       "total": 6
+    },
+    {
+      "name": "Sentence Chunking",
+      "params": {
+        "tokenizer": "character",
+        "chunk_size": 2048,
+        "chunk_overlap": 128,
+        "min_sentences_per_chunk": 1
+      },
+      "chunks": [
+        {
+          "index": 0,
+          "start": 0,
+          "end": 2042
+        },
+        {
+          "index": 1,
+          "start": 1956,
+          "end": 3940
+        },
+        {
+          "index": 2,
+          "start": 3821,
+          "end": 5051
+        }
+      ],
+      "total": 3
+    },
+    {
+      "name": "Neural Chunking · chonky_modernbert_base_1",
+      "params": {
+        "model": "mirth/chonky_modernbert_base_1",
+        "device_map": "cpu",
+        "min_characters_per_chunk": 10
+      },
+      "chunks": [
+        {
+          "index": 0,
+          "start": 0,
+          "end": 359
+        },
+        {
+          "index": 1,
+          "start": 359,
+          "end": 579
+        },
+        {
+          "index": 2,
+          "start": 579,
+          "end": 944
+        },
+        {
+          "index": 3,
+          "start": 944,
+          "end": 1309
+        },
+        {
+          "index": 4,
+          "start": 1309,
+          "end": 1707
+        },
+        {
+          "index": 5,
+          "start": 1707,
+          "end": 2041
+        },
+        {
+          "index": 6,
+          "start": 2041,
+          "end": 2889
+        },
+        {
+          "index": 7,
+          "start": 2889,
+          "end": 3178
+        },
+        {
+          "index": 8,
+          "start": 3178,
+          "end": 3727
+        },
+        {
+          "index": 9,
+          "start": 3727,
+          "end": 3989
+        },
+        {
+          "index": 10,
+          "start": 3989,
+          "end": 4275
+        },
+        {
+          "index": 11,
+          "start": 4275,
+          "end": 4543
+        },
+        {
+          "index": 12,
+          "start": 4543,
+          "end": 5051
+        }
+      ],
+      "total": 13
     }
   ]
 }
