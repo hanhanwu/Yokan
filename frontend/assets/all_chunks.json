@@ -167,7 +167,7 @@
       "name": "Neural Chunking · chonky_modernbert_base_1",
       "params": {
         "model": "mirth/chonky_modernbert_base_1",
-        "device_map": "cpu",
+        "device_map": "auto",
         "min_characters_per_chunk": 10
       },
       "chunks": [

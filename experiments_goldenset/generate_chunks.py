@@ -17,16 +17,37 @@ import sys
 import yaml
 
 try:
+    import torch
+    def _best_device() -> str:
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+        return "cpu"
+except ImportError:
+    def _best_device() -> str:
+        return "cpu"
+
+try:
     from chonkie import LateChunker, NeuralChunker, RecursiveRules, SemanticChunker, SentenceChunker
 except ImportError:
     sys.exit("chonkie not found – activate the project venv and run again.")
+
+def _make_neural_chunker(params: dict):
+    """Build NeuralChunker, resolving device_map='auto' to the best available device."""
+    p = dict(params)
+    if p.get("device_map", "cpu") == "auto":
+        p["device_map"] = _best_device()
+        print(f"  (device_map resolved to '{p['device_map']}')", flush=True)
+    return NeuralChunker(**p)
+
 
 # Map type string → chunker factory
 CHUNKER_TYPES = {
     "semantic": lambda params: SemanticChunker(**params),
     "late": lambda params: LateChunker(rules=RecursiveRules(), **params),
     "sentence": lambda params: SentenceChunker(**params),
-    "neural": lambda params: NeuralChunker(**params),
+    "neural": _make_neural_chunker,
 }
 
 

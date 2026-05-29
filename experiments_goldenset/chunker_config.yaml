@@ -30,5 +30,5 @@ configs:
   - name: "Neural Chunking · chonky_modernbert_base_1"
     type: neural
     model: "mirth/chonky_modernbert_base_1"
-    device_map: "cpu"
+    device_map: "auto"   # resolved at runtime: mps > cuda > cpu
     min_characters_per_chunk: 10
