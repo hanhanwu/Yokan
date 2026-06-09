@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View, Platform } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View, Platform, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -66,7 +66,13 @@ function buildSegments(fullText: string, chunks: ChunkPos[]): Segment[] {
 // ─── Single config column ─────────────────────────────────────────────────────
 
 function ConfigColumn({ cfg, text, filename }: { cfg: ConfigData; text: string; filename: string }) {
-  const segments = useMemo(() => buildSegments(text, cfg.chunks), [text, cfg.chunks]);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+
+  const selectedChunkText = useMemo(() => {
+    if (selectedIndex === null) return null;
+    const chunk = cfg.chunks.find(c => c.index === selectedIndex);
+    return chunk ? text.slice(chunk.start, chunk.end) : null;
+  }, [selectedIndex, cfg.chunks, text]);
 
   return (
     <View style={styles.column}>
@@ -84,58 +90,61 @@ function ConfigColumn({ cfg, text, filename }: { cfg: ConfigData; text: string; 
             </View>
           ))}
         </View>
-
-        {/* Chunk legend chips */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.legendScroll}
-          contentContainerStyle={styles.legendContent}
-        >
-          {cfg.chunks.map((_, i) => (
-            <View key={i} style={[styles.legendChip, { backgroundColor: chunkColor(i) }]}>
-              <Text style={styles.legendChipText}>{i + 1}</Text>
-            </View>
-          ))}
-        </ScrollView>
       </View>
 
-      {/* ── Scrollable paper area ── */}
-      <ScrollView
-        style={styles.paperScroll}
-        contentContainerStyle={styles.paperScrollContent}
-        showsVerticalScrollIndicator
-        nestedScrollEnabled
-      >
-        <View style={styles.paper}>
-          {/* Fake PDF filename bar */}
-          <View style={styles.pdfHeaderRow}>
-            <View style={styles.pdfLine} />
-            <Text style={styles.pdfFilename} numberOfLines={1}>{filename}</Text>
-            <View style={styles.pdfLine} />
-          </View>
+      {/* ── Two-pane area ── */}
+      <View style={styles.twoPaneArea}>
+        {/* Left: clickable chunk list */}
+        <ScrollView style={styles.chunkList} showsVerticalScrollIndicator={false}>
+          {cfg.chunks.map((chunk, i) => (
+            <TouchableOpacity
+              key={i}
+              style={[
+                styles.chunkItem,
+                { borderLeftColor: chunkColor(chunk.index) },
+                selectedIndex === chunk.index && styles.chunkItemSelected,
+              ]}
+              onPress={() => setSelectedIndex(selectedIndex === chunk.index ? null : chunk.index)}
+            >
+              <Text style={[
+                styles.chunkItemText,
+                selectedIndex === chunk.index && styles.chunkItemTextSelected,
+              ]}>#{chunk.index + 1}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
 
-          {/* Body text with inline chunk highlights */}
-          <Text style={styles.bodyText}>
-            {segments.map((seg: Segment, i: number) =>
-              seg.chunkIndex !== null ? (
-                <Text
-                  key={i}
-                  style={[
-                    styles.bodyText,
-                    styles.highlight,
-                    { backgroundColor: chunkColor(seg.chunkIndex) },
-                  ]}
-                >
-                  {seg.text}
+        {/* Divider */}
+        <View style={styles.twoPaneDivider} />
+
+        {/* Right: selected chunk text */}
+        <ScrollView
+          style={styles.chunkTextPane}
+          contentContainerStyle={styles.chunkTextPaneContent}
+          showsVerticalScrollIndicator
+          nestedScrollEnabled
+        >
+          {selectedChunkText !== null ? (
+            <View style={[
+              styles.paper,
+              { borderLeftWidth: 4, borderLeftColor: chunkColor(selectedIndex!) },
+            ]}>
+              <View style={styles.pdfHeaderRow}>
+                <View style={styles.pdfLine} />
+                <Text style={styles.pdfFilename} numberOfLines={1}>
+                  {filename} · chunk #{selectedIndex! + 1}
                 </Text>
-              ) : (
-                <Text key={i} style={styles.bodyText}>{seg.text}</Text>
-              )
-            )}
-          </Text>
-        </View>
-      </ScrollView>
+                <View style={styles.pdfLine} />
+              </View>
+              <Text style={styles.bodyText}>{selectedChunkText}</Text>
+            </View>
+          ) : (
+            <View style={styles.placeholderWrap}>
+              <Text style={styles.placeholderText}>← Select a chunk to view its text</Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -350,5 +359,71 @@ const styles = StyleSheet.create({
   // Highlighted chunk inline span
   highlight: {
     borderRadius: 2,
+  },
+
+  // ── Two-pane layout ──
+  twoPaneArea: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  twoPaneDivider: {
+    width: 1,
+    backgroundColor: '#DADCE0',
+  },
+
+  // Left chunk list
+  chunkList: {
+    width: 72,
+    backgroundColor: '#F8F9FA',
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  chunkItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginHorizontal: 8,
+    marginBottom: 4,
+    borderRadius: 6,
+    borderLeftWidth: 4,
+    backgroundColor: '#FFFFFF',
+    ...Platform.select({
+      web: {
+        // @ts-ignore
+        cursor: 'pointer',
+      },
+    }),
+  },
+  chunkItemSelected: {
+    backgroundColor: '#E8F0FE',
+  },
+  chunkItemText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#5F6368',
+    textAlign: 'center',
+  },
+  chunkItemTextSelected: {
+    color: '#1A1A2E',
+  },
+
+  // Right text pane
+  chunkTextPane: {
+    flex: 1,
+  },
+  chunkTextPaneContent: {
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  placeholderWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 60,
+  },
+  placeholderText: {
+    fontSize: 13,
+    color: '#9AA0A6',
+    fontStyle: 'italic',
   },
 });
