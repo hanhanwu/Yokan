@@ -157,40 +157,17 @@ function TopicCard({
         <Text style={[topicCardStyles.topicName, { color: color.text }]} numberOfLines={2}>
           {topic}
         </Text>
-        <View style={[topicCardStyles.badge, { backgroundColor: color.bg }]}>
-          <Text style={[topicCardStyles.badgeText, { color: color.text }]}>{matches.length}</Text>
-        </View>
       </View>
 
-      {/* Clickable rank buttons */}
-      <View style={topicCardStyles.rankRow}>
+      {/* Score bars for all matches — make each block clickable */}
+      <View style={topicCardStyles.scoreSection}>
         {matches.map((m) => {
           const isSelected = activeRank === m.rank;
           return (
             <TouchableOpacity
               key={m.chunk_index}
-              style={[
-                topicCardStyles.rankBtn,
-                { borderColor: color.border, backgroundColor: isSelected ? color.border : color.bg },
-              ]}
               onPress={() => onMatchSelect(m.rank)}
-              activeOpacity={0.7}
-            >
-              <Text style={[topicCardStyles.rankBtnText, { color: isSelected ? '#fff' : color.text }]}>
-                #{m.rank}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Score bars for all matches */}
-      <View style={topicCardStyles.scoreSection}>
-        {matches.map((m) => {
-          const isSelected = activeRank === m.rank;
-          return (
-            <View
-              key={m.chunk_index}
+              activeOpacity={0.8}
               style={[
                 topicCardStyles.matchScoreBlock,
                 isSelected && { backgroundColor: color.bg, borderRadius: 4 },
@@ -200,7 +177,7 @@ function TopicCard({
               <ScoreBar label="rrf"  value={m.rrf_score}       max={0.02} color={color.border} />
               <ScoreBar label="sem"  value={m.semantic_score}  max={1}    color={color.border} />
               <ScoreBar label="bm25" value={m.bm25_score}      max={20}   color={color.border} />
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>
@@ -287,7 +264,9 @@ const topicCardStyles = StyleSheet.create({
 export default function TopicHighlights() {
   const { filename, text, topics, results } = data;
   const [activeMatch, setActiveMatch] = useState<ActiveMatch>(null);
-  const initialWidth = Platform.OS === 'web' ? Math.floor((window as any).innerWidth / 2) : 280;
+  const initialWidth = Platform.OS === 'web' && typeof (globalThis as any).window !== 'undefined'
+    ? Math.floor(((globalThis as any).window as any).innerWidth / 2)
+    : 280;
   const [sidebarWidth, setSidebarWidth] = useState(initialWidth);
   const isDragging = useRef(false);
   const sidebarWidthRef = useRef(initialWidth);
@@ -301,8 +280,8 @@ export default function TopicHighlights() {
   useEffect(() => {
     if (activeMatch === null) return;
     const timer = setTimeout(() => {
-      if (Platform.OS === 'web') {
-        (document as any).getElementById('active-highlight')
+      if (Platform.OS === 'web' && typeof (globalThis as any).document !== 'undefined') {
+        ((globalThis as any).document as any).getElementById('active-highlight')
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }, 60);
@@ -314,31 +293,34 @@ export default function TopicHighlights() {
     if (Platform.OS !== 'web') return;
     e.preventDefault();
     isDragging.current = true;
-    const startX: number = e.clientX;
+    const startX: number = (e as any).clientX;
     const startWidth: number = sidebarWidthRef.current;
     // Prevent text selection and pointer interference during drag
-    if (Platform.OS === 'web') {
-      (document.body.style as any).userSelect = 'none';
-      (document.body.style as any).pointerEvents = 'none';
+    if (typeof (globalThis as any).document !== 'undefined') {
+      ((globalThis as any).document.body.style as any).userSelect = 'none';
+      ((globalThis as any).document.body.style as any).pointerEvents = 'none';
     }
-    const onMouseMove = (me: MouseEvent) => {
+    const onMouseMove = (me: any) => {
       if (!isDragging.current) return;
       const delta = me.clientX - startX;
-      const newWidth = Math.max(120, Math.min(startWidth + delta, (window as any).innerWidth - 120));
+      const maxW = typeof (globalThis as any).window !== 'undefined' ? ((globalThis as any).window as any).innerWidth - 120 : 1200;
+      const newWidth = Math.max(120, Math.min(startWidth + delta, maxW));
       sidebarWidthRef.current = newWidth;
       setSidebarWidth(newWidth);
     };
     const onMouseUp = () => {
       isDragging.current = false;
-      if (Platform.OS === 'web') {
-        (document.body.style as any).userSelect = '';
-        (document.body.style as any).pointerEvents = '';
+      if (typeof (globalThis as any).document !== 'undefined') {
+        ((globalThis as any).document.body.style as any).userSelect = '';
+        ((globalThis as any).document.body.style as any).pointerEvents = '';
+        ((globalThis as any).document as any).removeEventListener('mousemove', onMouseMove);
+        ((globalThis as any).document as any).removeEventListener('mouseup', onMouseUp);
       }
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
     };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    if (typeof (globalThis as any).document !== 'undefined') {
+      ((globalThis as any).document as any).addEventListener('mousemove', onMouseMove);
+      ((globalThis as any).document as any).addEventListener('mouseup', onMouseUp);
+    }
   }
 
   function handleMatchSelect(topic: string, rank: number) {
