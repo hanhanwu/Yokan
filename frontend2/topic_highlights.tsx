@@ -34,7 +34,12 @@ type Segment = {
   text: string;
   topicIndex: number | null; // null = unhighlighted gap
   matchRank: number;
+  start: number; // character offset in full text
 };
+
+type UserAnnotation = { start: number; end: number; topicIndex: number };
+
+type SelectionPopupState = { x: number; y: number; start: number; end: number } | null;
 
 // ─── Asset ───────────────────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -67,45 +72,68 @@ function buildSegments(
   topics: string[],
   results: Record<string, TopicMatch[]>,
   activeMatch: ActiveMatch,
+  userAnnotations: UserAnnotation[] = [],
 ): Segment[] {
+  // Build base intervals
+  let baseIntervals: { start: number; end: number; topicIndex: number; rank: number }[] = [];
+
   if (activeMatch !== null) {
     const matches = results[activeMatch.topic] ?? [];
     const match = matches.find((m) => m.rank === activeMatch.rank);
-    if (!match) return [{ text: fullText, topicIndex: null, matchRank: 0 }];
-    const topicIndex = topics.indexOf(activeMatch.topic);
-    const segs: Segment[] = [];
-    if (match.start > 0) segs.push({ text: fullText.slice(0, match.start), topicIndex: null, matchRank: 0 });
-    segs.push({ text: fullText.slice(match.start, match.end), topicIndex, matchRank: match.rank });
-    if (match.end < fullText.length) segs.push({ text: fullText.slice(match.end), topicIndex: null, matchRank: 0 });
-    return segs;
+    if (match) {
+      const topicIndex = topics.indexOf(activeMatch.topic);
+      baseIntervals = [{ start: match.start, end: match.end, topicIndex, rank: match.rank }];
+    }
+  } else {
+    const spanMap: Map<string, { topicIndex: number; rank: number; end: number }> = new Map();
+    topics.forEach((topic, tIdx) => {
+      const matches = results[topic] ?? [];
+      matches.forEach((m) => {
+        const key = `${m.start}`;
+        const existing = spanMap.get(key);
+        if (!existing || m.rank < existing.rank || (m.rank === existing.rank && tIdx < existing.topicIndex)) {
+          spanMap.set(key, { topicIndex: tIdx, rank: m.rank, end: m.end });
+        }
+      });
+    });
+    baseIntervals = Array.from(spanMap.entries())
+      .map(([startStr, v]) => ({ start: parseInt(startStr, 10), end: v.end, topicIndex: v.topicIndex, rank: v.rank }));
   }
 
-  // No selection — show all highlights
-  const spanMap: Map<string, { topicIndex: number; rank: number; end: number }> = new Map();
-  topics.forEach((topic, tIdx) => {
-    const matches = results[topic] ?? [];
-    matches.forEach((m) => {
-      const key = `${m.start}`;
-      const existing = spanMap.get(key);
-      if (!existing || m.rank < existing.rank || (m.rank === existing.rank && tIdx < existing.topicIndex)) {
-        spanMap.set(key, { topicIndex: tIdx, rank: m.rank, end: m.end });
-      }
-    });
-  });
+  // User annotations have highest priority — clip base intervals around them so there are no overlaps
+  const userIntervals = userAnnotations.map((a) => ({ start: a.start, end: a.end, topicIndex: a.topicIndex, rank: -1 }));
 
-  const intervals = Array.from(spanMap.entries())
-    .map(([startStr, v]) => ({ start: parseInt(startStr, 10), end: v.end, topicIndex: v.topicIndex, rank: v.rank }))
-    .sort((a, b) => a.start - b.start);
+  const clippedBase: typeof baseIntervals = [];
+  for (const base of baseIntervals) {
+    let remaining: { start: number; end: number }[] = [{ start: base.start, end: base.end }];
+    for (const ua of userIntervals) {
+      const next: { start: number; end: number }[] = [];
+      for (const r of remaining) {
+        if (ua.end <= r.start || ua.start >= r.end) {
+          next.push(r); // no overlap
+        } else {
+          if (r.start < ua.start) next.push({ start: r.start, end: ua.start });
+          if (r.end > ua.end) next.push({ start: ua.end, end: r.end });
+        }
+      }
+      remaining = next;
+    }
+    for (const r of remaining) {
+      clippedBase.push({ start: r.start, end: r.end, topicIndex: base.topicIndex, rank: base.rank });
+    }
+  }
+
+  const allIntervals = [...userIntervals, ...clippedBase].sort((a, b) => a.start - b.start);
 
   const segments: Segment[] = [];
   let cursor = 0;
-  for (const span of intervals) {
+  for (const span of allIntervals) {
     if (span.start < cursor) continue;
-    if (span.start > cursor) segments.push({ text: fullText.slice(cursor, span.start), topicIndex: null, matchRank: 0 });
-    segments.push({ text: fullText.slice(span.start, span.end), topicIndex: span.topicIndex, matchRank: span.rank });
+    if (span.start > cursor) segments.push({ text: fullText.slice(cursor, span.start), topicIndex: null, matchRank: 0, start: cursor });
+    segments.push({ text: fullText.slice(span.start, span.end), topicIndex: span.topicIndex, matchRank: span.rank, start: span.start });
     cursor = span.end;
   }
-  if (cursor < fullText.length) segments.push({ text: fullText.slice(cursor), topicIndex: null, matchRank: 0 });
+  if (cursor < fullText.length) segments.push({ text: fullText.slice(cursor), topicIndex: null, matchRank: 0, start: cursor });
   return segments;
 }
 
@@ -264,6 +292,10 @@ const topicCardStyles = StyleSheet.create({
 export default function TopicHighlights() {
   const { filename, text, topics, results } = data;
   const [activeMatch, setActiveMatch] = useState<ActiveMatch>(null);
+  const [userAnnotations, setUserAnnotations] = useState<UserAnnotation[]>([]);
+  const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState>(null);
+  // Maps nativeID "seg-{i}" → character start offset in full text
+  const segStartsRef = useRef<Record<string, number>>({});
   const initialWidth = Platform.OS === 'web' && typeof (globalThis as any).window !== 'undefined'
     ? Math.floor(((globalThis as any).window as any).innerWidth / 2)
     : 280;
@@ -272,21 +304,120 @@ export default function TopicHighlights() {
   const sidebarWidthRef = useRef(initialWidth);
 
   const segments = useMemo(
-    () => buildSegments(text, topics, results, activeMatch),
-    [text, topics, results, activeMatch],
+    () => buildSegments(text, topics, results, activeMatch, userAnnotations),
+    [text, topics, results, activeMatch, userAnnotations],
   );
+
+  // Text selection → topic picker popup (web only)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const doc: any = (globalThis as any).document;
+    if (!doc) return;
+
+    const handleMouseUp = (e: any) => {
+      // Ignore clicks inside the popup itself
+      if (e?.target?.closest?.('[data-selection-popup]')) return;
+
+      // Use rAF so the browser has fully committed the selection by the time we read it
+      ;(globalThis as any).requestAnimationFrame(() => {
+        const docObj: any = (globalThis as any).document;
+        const sel: any = (globalThis as any).window?.getSelection?.();
+        if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+          setSelectionPopup(null);
+          return;
+        }
+
+        try {
+          const range: any = sel.getRangeAt(0);
+          const rect: any = range.getBoundingClientRect();
+          if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+          // Find the nearest ancestor element with id="seg-{n}"
+          const getSegEl = (node: any): any => {
+            let el: any = node.nodeType === 3 ? node.parentElement : node;
+            while (el) {
+              if ((el.id ?? '').startsWith('seg-') && el.id in segStartsRef.current) return el;
+              el = el.parentElement;
+            }
+            return null;
+          };
+
+          // Compute absolute char offset: create a Range from [segEl,0] to
+          // [container,domOffset] and call toString() — the browser handles all
+          // nested-span / Element-vs-TextNode ambiguity internally.
+          // Do NOT strip \n: the source text may contain real newlines, and all
+          // seg-N spans are inline so the browser never injects synthetic ones.
+          const getDocOffset = (container: any, domOffset: number): number | null => {
+            const segEl = getSegEl(container);
+            if (!segEl) return null;
+            const segStart: number = segStartsRef.current[segEl.id];
+            try {
+              const r = docObj.createRange();
+              r.setStart(segEl, 0);
+              r.setEnd(container, domOffset);
+              return segStart + r.toString().length;
+            } catch {
+              return null;
+            }
+          };
+
+          const docStart = getDocOffset(range.startContainer, range.startOffset);
+          const docEnd   = getDocOffset(range.endContainer,   range.endOffset);
+          if (docStart === null || docEnd === null || docEnd <= docStart) return;
+
+          setSelectionPopup({
+            x: rect.left + rect.width / 2,
+            y: rect.bottom + 8,
+            start: docStart,
+            end: docEnd,
+          });
+        } catch {
+          // ignore
+        }
+      });
+    };
+
+    const handleKeyDown = (e: any) => {
+      if (e?.key === 'Escape') setSelectionPopup(null);
+    };
+
+    doc.addEventListener('mouseup', handleMouseUp);
+    doc.addEventListener('keydown', handleKeyDown);
+    return () => {
+      doc.removeEventListener('mouseup', handleMouseUp);
+      doc.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  function applyAnnotation(topicIndex: number) {
+    if (!selectionPopup) return;
+    setUserAnnotations((prev) => [
+      ...prev.filter((a) => !(a.start < selectionPopup.end && a.end > selectionPopup.start)), // remove overlapping
+      { start: selectionPopup.start, end: selectionPopup.end, topicIndex },
+    ]);
+    setSelectionPopup(null);
+    // Clear browser selection
+    (globalThis as any).window?.getSelection?.()?.removeAllRanges?.();
+  }
 
   // Auto-scroll right panel to highlighted text
   useEffect(() => {
     if (activeMatch === null) return;
     const timer = setTimeout(() => {
       if (Platform.OS === 'web' && typeof (globalThis as any).document !== 'undefined') {
-        ((globalThis as any).document as any).getElementById('active-highlight')
-          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Find the seg-{i} id for the active match segment
+        const activeSegIdx = segments.findIndex(
+          (seg) => seg.topicIndex !== null && seg.matchRank === activeMatch.rank
+        );
+        if (activeSegIdx !== -1) {
+          ((globalThis as any).document as any)
+            .getElementById(`seg-${activeSegIdx}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
     }, 60);
     return () => clearTimeout(timer);
-  }, [activeMatch]);
+  }, [activeMatch, segments]);
 
   // Resizable divider
   function startResize(e: any) {
@@ -412,9 +543,16 @@ export default function TopicHighlights() {
 
             <Text style={styles.bodyText}>
               {segments.map((seg, i) => {
+                const segId = `seg-${i}`;
+                // Keep ref map up to date (safe to mutate during render for web-only lookup)
+                segStartsRef.current[segId] = seg.start;
                 if (seg.topicIndex === null) {
                   return (
-                    <Text key={i} style={styles.bodyText}>
+                    <Text
+                      key={i}
+                      nativeID={segId}
+                      style={styles.bodyText}
+                    >
                       {seg.text}
                     </Text>
                   );
@@ -423,7 +561,7 @@ export default function TopicHighlights() {
                 return (
                   <Text
                     key={i}
-                    nativeID={activeMatch !== null ? 'active-highlight' : undefined}
+                    nativeID={segId}
                     style={[
                       styles.bodyText,
                       styles.highlight,
@@ -438,9 +576,112 @@ export default function TopicHighlights() {
           </View>
         </ScrollView>
       </View>
+      {/* ── Selection → topic picker popup (web only) ── */}
+      {selectionPopup !== null && Platform.OS === 'web' && (
+        <View
+          data-selection-popup
+          style={[
+            popupStyles.container,
+            {
+              left: selectionPopup.x - 160,
+              top: selectionPopup.y,
+            },
+          ]}
+        >
+          <Text style={popupStyles.heading}>Assign topic colour</Text>
+          <View style={popupStyles.grid}>
+            {topics.map((topic, i) => {
+              const c = topicColor(i);
+              return (
+                <TouchableOpacity
+                  key={topic}
+                  onPress={() => applyAnnotation(i)}
+                  activeOpacity={0.8}
+                  style={[popupStyles.topicBtn, { backgroundColor: c.bg, borderColor: c.border }]}
+                >
+                  <View style={[popupStyles.dot, { backgroundColor: c.border }]} />
+                  <Text style={[popupStyles.topicBtnText, { color: c.text }]} numberOfLines={1}>
+                    {topic}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity onPress={() => setSelectionPopup(null)} style={popupStyles.cancelBtn}>
+            <Text style={popupStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
+
+// ─── Selection popup styles ───────────────────────────────────────────────────
+
+const popupStyles = StyleSheet.create({
+  container: {
+    position: 'fixed' as any,
+    width: 320,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    padding: 14,
+    zIndex: 1000,
+    ...Platform.select({
+      web: {
+        // @ts-ignore
+        boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
+      },
+    }),
+  },
+  heading: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#888',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    textTransform: 'uppercase' as any,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  topicBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 5,
+    maxWidth: '100%',
+    ...Platform.select({ web: { cursor: 'pointer' as any } }),
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    flexShrink: 0,
+  },
+  topicBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  cancelBtn: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    ...Platform.select({ web: { cursor: 'pointer' as any } }),
+  },
+  cancelText: {
+    fontSize: 12,
+    color: '#888',
+  },
+});
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
