@@ -503,6 +503,9 @@ function DiagnosisChatbot({
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
+    // Abort if no response starts within 15 s
+    const timeoutId = setTimeout(() => ctrl.abort(), 15000);
+
     (async () => {
       try {
         const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -547,15 +550,26 @@ function DiagnosisChatbot({
             }
           }
         }
+        clearTimeout(timeoutId);
         streamDoneRef.current = true;
+        // Guard: if the stream completed but returned nothing, show an error
+        if (!receivedRef.current) {
+          setIsTyping(false);
+          setError('No response from model. Check the model name or try again.');
+        }
       } catch (err: any) {
-        if (err?.name === 'AbortError') return;
+        clearTimeout(timeoutId);
+        if (err?.name === 'AbortError') {
+          setIsTyping(false);
+          setError('Request timed out. Check your connection and try again.');
+          return;
+        }
         setIsTyping(false);
         setError(err?.message ?? 'Unknown error');
       }
     })();
 
-    return () => ctrl.abort();
+    return () => { ctrl.abort(); clearTimeout(timeoutId); };
   // Run once on mount only
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
