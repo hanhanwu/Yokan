@@ -287,6 +287,387 @@ const topicCardStyles = StyleSheet.create({
   },
 });
 
+// ─── LLM prompt builder ───────────────────────────────────────────────────────
+
+function buildPrompt(
+  docText: string,
+  topics: string[],
+  results: Record<string, TopicMatch[]>,
+  userAnnotations: UserAnnotation[],
+): string {
+  const changeLines = userAnnotations.map((ann) => {
+    const excerpt = docText.slice(ann.start, ann.end).trim().slice(0, 120) +
+      (ann.end - ann.start > 120 ? '…' : '');
+    let origTopic: string | null = null;
+    let origMatch: TopicMatch | null = null;
+    let bestRank = Infinity;
+    topics.forEach((topic) => {
+      (results[topic] ?? []).forEach((m) => {
+        if (m.start < ann.end && m.end > ann.start && m.rank < bestRank) {
+          bestRank = m.rank;
+          origTopic = topic;
+          origMatch = m;
+        }
+      });
+    });
+    const newTopic = ann.topicIndex !== null ? topics[ann.topicIndex] : null;
+    const m = origMatch as TopicMatch | null;
+    const scores = m
+      ? `rrf=${m.rrf_score.toFixed(4)}, semantic=${m.semantic_score.toFixed(4)}, bm25=${m.bm25_score.toFixed(4)}`
+      : 'no original match';
+
+    if (origTopic === null && newTopic !== null) {
+      return `- MISSED MATCH: text "${excerpt}" should belong to topic "${newTopic}" but the system did not assign any topic (no match found).`;
+    } else if (origTopic !== null && newTopic === null) {
+      return `- FALSE POSITIVE: text "${excerpt}" was wrongly assigned to topic "${origTopic}" (scores: ${scores}) — it has no relevant topic.`;
+    } else if (origTopic !== null && newTopic !== null) {
+      return `- WRONG TOPIC: text "${excerpt}" was assigned to "${origTopic}" (scores: ${scores}) but the correct topic is "${newTopic}".`;
+    }
+    return '';
+  }).filter(Boolean);
+
+  console.log('[DiagnosisPrompt] Human corrections sent to LLM:');
+  changeLines.forEach((line) => console.log(line));
+
+  const changes = changeLines.join('\n');
+
+  return `You are an expert in RAG (Retrieval-Augmented Generation) systems and information retrieval.
+
+## Task background
+A document has been processed by a hybrid topic-matching pipeline that uses Reciprocal Rank Fusion (RRF) combining:
+- Dense semantic embeddings (cosine similarity)
+- BM25 lexical scoring
+
+The pipeline matches text spans in the document to a set of topics. A human reviewer has corrected the automatic assignments.
+
+## Topics in the system
+${topics.map((t, i) => `${i + 1}. ${t}`).join('\n')}
+
+## Human corrections (Before → After)
+${changes}
+
+## Your task
+For each correction write one numbered entry (2-3 sentences max): failure mode, why the pipeline erred, targeted fix.
+
+Close with a 1-2 sentence summary of the dominant pattern and the single most impactful improvement.
+
+Strict rules: plain prose only — no markdown headers, no bold, no bullet symbols, no horizontal rules. Maximum 160 words total. Cut anything obvious.`;
+}
+
+// ─── Simple markdown → plain-text renderer ───────────────────────────────────
+
+function stripInline(text: string): string {
+  return text
+    .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1');
+}
+
+type MdBlock =
+  | { type: 'heading'; level: number; text: string }
+  | { type: 'bullet'; text: string }
+  | { type: 'numbered'; n: number; text: string }
+  | { type: 'paragraph'; text: string };
+
+function parseMarkdown(raw: string): MdBlock[] {
+  const blocks: MdBlock[] = [];
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (!t || t === '---' || t === '***' || t === '___') continue;
+    const m3 = t.match(/^###\s+(.*)/);
+    if (m3) { blocks.push({ type: 'heading', level: 3, text: stripInline(m3[1]) }); continue; }
+    const m2 = t.match(/^##\s+(.*)/);
+    if (m2) { blocks.push({ type: 'heading', level: 2, text: stripInline(m2[1]) }); continue; }
+    const m1 = t.match(/^#\s+(.*)/);
+    if (m1) { blocks.push({ type: 'heading', level: 1, text: stripInline(m1[1]) }); continue; }
+    const bull = t.match(/^[-*+]\s+(.*)/);
+    if (bull) { blocks.push({ type: 'bullet', text: stripInline(bull[1]) }); continue; }
+    const num = t.match(/^(\d+)\.\s+(.*)/);
+    if (num) { blocks.push({ type: 'numbered', n: parseInt(num[1], 10), text: stripInline(num[2]) }); continue; }
+    blocks.push({ type: 'paragraph', text: stripInline(t) });
+  }
+  return blocks;
+}
+
+function MarkdownView({ raw, showCursor }: { raw: string; showCursor: boolean }) {
+  const blocks = parseMarkdown(raw);
+  return (
+    <View>
+      {blocks.map((block, i) => {
+        const isLast = i === blocks.length - 1;
+        const suffix = isLast && showCursor ? '▋' : '';
+        if (block.type === 'heading') {
+          const sz = block.level === 1 ? 14 : block.level === 2 ? 13 : 12;
+          return (
+            <Text key={i} style={[mdStyles.heading, { fontSize: sz }]}>
+              {block.text}{suffix}
+            </Text>
+          );
+        }
+        if (block.type === 'bullet') {
+          return (
+            <View key={i} style={mdStyles.listRow}>
+              <Text style={mdStyles.listMarker}>•</Text>
+              <Text style={mdStyles.listText}>{block.text}{suffix}</Text>
+            </View>
+          );
+        }
+        if (block.type === 'numbered') {
+          return (
+            <View key={i} style={mdStyles.listRow}>
+              <Text style={mdStyles.listMarker}>{block.n}.</Text>
+              <Text style={mdStyles.listText}>{block.text}{suffix}</Text>
+            </View>
+          );
+        }
+        return (
+          <Text key={i} style={mdStyles.paragraph}>{block.text}{suffix}</Text>
+        );
+      })}
+    </View>
+  );
+}
+
+const mdStyles = StyleSheet.create({
+  heading: {
+    color: '#B0BAFF',
+    fontWeight: '700',
+    marginTop: 10,
+    marginBottom: 3,
+    lineHeight: 20,
+  },
+  listRow: {
+    flexDirection: 'row',
+    marginBottom: 5,
+    paddingLeft: 2,
+  },
+  listMarker: {
+    color: '#6868A8',
+    fontSize: 12,
+    lineHeight: 20,
+    marginRight: 6,
+    minWidth: 16,
+  },
+  listText: {
+    color: '#D0D0F0',
+    fontSize: 12,
+    lineHeight: 20,
+    flex: 1,
+  },
+  paragraph: {
+    color: '#D0D0F0',
+    fontSize: 12,
+    lineHeight: 20,
+    marginBottom: 7,
+  },
+});
+
+// ─── Diagnosis chatbot component ──────────────────────────────────────────────
+
+const GROQ_API_KEY = (process.env as any).EXPO_PUBLIC_GROQ_API_KEY ?? '';
+const GROQ_MODEL = 'openai/gpt-oss-20b';
+// Typing speed: characters advanced per tick
+const CHARS_PER_TICK = 5;
+const TICK_MS = 28;
+
+function DiagnosisChatbot({
+  docText,
+  topics,
+  results,
+  userAnnotations,
+}: {
+  docText: string;
+  topics: string[];
+  results: Record<string, TopicMatch[]>;
+  userAnnotations: UserAnnotation[];
+}) {
+  const [displayed, setDisplayed] = useState('');
+  const [isTyping, setIsTyping] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [cursorOn, setCursorOn] = useState(true);
+  const [panelWidth, setPanelWidth] = useState(480);
+  const scrollRef = useRef<any>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  // Buffer for received text; display advances slowly via timer
+  const receivedRef = useRef('');
+  const displayCountRef = useRef(0);
+  const streamDoneRef = useRef(false);
+  const panelWidthRef = useRef(480);
+  const isDraggingChatRef = useRef(false);
+
+  // Stream from Groq on mount — accumulate into receivedRef
+  useEffect(() => {
+    const prompt = buildPrompt(docText, topics, results, userAnnotations);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    (async () => {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          signal: ctrl.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: GROQ_MODEL,
+            stream: true,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+
+        if (!res.ok) {
+          const body = await res.text();
+          throw new Error(`Groq API error ${res.status}: ${body}`);
+        }
+
+        const reader = (res as any).body.getReader();
+        const decoder = new (globalThis as any).TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === 'data: [DONE]') continue;
+            if (!trimmed.startsWith('data: ')) continue;
+            try {
+              const json = JSON.parse(trimmed.slice(6));
+              const token: string = json.choices?.[0]?.delta?.content ?? '';
+              if (token) receivedRef.current += token;
+            } catch {
+              // malformed chunk — skip
+            }
+          }
+        }
+        streamDoneRef.current = true;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+        setIsTyping(false);
+        setError(err?.message ?? 'Unknown error');
+      }
+    })();
+
+    return () => ctrl.abort();
+  // Run once on mount only
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Slow-typing timer: advance displayed text by CHARS_PER_TICK every TICK_MS ms
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const target = receivedRef.current.length;
+      if (displayCountRef.current < target) {
+        displayCountRef.current = Math.min(displayCountRef.current + CHARS_PER_TICK, target);
+        const slice = receivedRef.current.slice(0, displayCountRef.current);
+        setDisplayed(slice);
+        setTimeout(() => scrollRef.current?.scrollToEnd?.({ animated: false }), 0);
+      } else if (streamDoneRef.current) {
+        setIsTyping(false);
+      }
+    }, TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Blinking cursor
+  useEffect(() => {
+    const blink = setInterval(() => setCursorOn((v) => !v), 530);
+    return () => clearInterval(blink);
+  }, []);
+
+  // Resize handle (on the left edge of the panel — drag left to widen)
+  function startPanelResize(e: any) {
+    if (Platform.OS !== 'web') return;
+    e.preventDefault();
+    isDraggingChatRef.current = true;
+    const startX: number = e.clientX;
+    const startW: number = panelWidthRef.current;
+    const doc = (globalThis as any).document;
+    if (doc) {
+      doc.body.style.userSelect = 'none';
+      doc.body.style.pointerEvents = 'none';
+    }
+    const onMove = (me: any) => {
+      if (!isDraggingChatRef.current) return;
+      const delta = startX - me.clientX; // drag left = increase width
+      const newW = Math.max(300, Math.min(startW + delta, 900));
+      panelWidthRef.current = newW;
+      setPanelWidth(newW);
+    };
+    const onUp = () => {
+      isDraggingChatRef.current = false;
+      if (doc) {
+        doc.body.style.userSelect = '';
+        doc.body.style.pointerEvents = '';
+        doc.removeEventListener('mousemove', onMove);
+        doc.removeEventListener('mouseup', onUp);
+      }
+    };
+    if (doc) {
+      doc.addEventListener('mousemove', onMove);
+      doc.addEventListener('mouseup', onUp);
+    }
+  }
+
+  return (
+    <View style={[chatStyles.panel, { width: panelWidth }]}>
+      {/* Left-edge resize handle */}
+      <View
+        style={chatStyles.resizeHandle}
+        {...(Platform.OS === 'web' ? { onMouseDown: startPanelResize } : {})}
+      >
+        <View style={chatStyles.resizeHandleBar} />
+      </View>
+
+      {/* Inner content */}
+      <View style={chatStyles.inner}>
+        {/* Header */}
+        <View style={chatStyles.header}>
+          <View style={chatStyles.headerIcon}>
+            <Text style={chatStyles.headerIconText}>✦</Text>
+          </View>
+          <Text style={chatStyles.headerTitle}>AI Diagnosis</Text>
+          {isTyping && !error && (
+            <View style={chatStyles.typingBadge}>
+              <Text style={chatStyles.typingBadgeText}>typing…</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Message area */}
+        <ScrollView
+          ref={scrollRef}
+          style={chatStyles.scroll}
+          contentContainerStyle={chatStyles.scrollContent}
+          showsVerticalScrollIndicator={true}
+        >
+          {error ? (
+            <View style={chatStyles.errorBubble}>
+              <Text style={chatStyles.errorText}>⚠ {error}</Text>
+            </View>
+          ) : displayed === '' ? (
+            <View style={chatStyles.thinkingRow}>
+              <Text style={chatStyles.thinkingText}>Analyzing topic changes</Text>
+              <Text style={chatStyles.thinkingDots}>   . . .</Text>
+            </View>
+          ) : (
+            <View style={chatStyles.bubble}>
+              <MarkdownView raw={displayed} showCursor={isTyping && cursorOn} />
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
 // ─── Root component ───────────────────────────────────────────────────────────
 
 export default function TopicHighlights() {
@@ -294,6 +675,7 @@ export default function TopicHighlights() {
   const [activeMatch, setActiveMatch] = useState<ActiveMatch>(null);
   const [userAnnotations, setUserAnnotations] = useState<UserAnnotation[]>([]);
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState>(null);
+  const [submitted, setSubmitted] = useState(false);
   // Maps nativeID "seg-{i}" → character start offset in full text
   const segStartsRef = useRef<Record<string, number>>({});
   const initialWidth = Platform.OS === 'web' && typeof (globalThis as any).window !== 'undefined'
@@ -306,6 +688,16 @@ export default function TopicHighlights() {
   const segments = useMemo(
     () => buildSegments(text, topics, results, activeMatch, userAnnotations),
     [text, topics, results, activeMatch, userAnnotations],
+  );
+
+  const originalSegments = useMemo(
+    () => buildSegments(text, topics, results, null, []),
+    [text, topics, results],
+  );
+
+  const submittedSegments = useMemo(
+    () => buildSegments(text, topics, results, null, userAnnotations),
+    [text, topics, results, userAnnotations],
   );
 
   // Text selection → topic picker popup (web only)
@@ -475,7 +867,99 @@ export default function TopicHighlights() {
         </Text>
       </View>
 
-      {/* ── Body: sidebar + document ── */}
+      {/* ── Body: sidebar + document  OR  diff view ── */}
+      {submitted ? (
+        /* ── Diff view: Before (left) vs After (right) ── */
+        <View style={styles.diffContainer}>
+          {/* toolbar */}
+          <View style={styles.diffToolbar}>
+            <TouchableOpacity
+              onPress={() => setSubmitted(false)}
+              style={styles.backBtn}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.backBtnText}>← Back to Edit</Text>
+            </TouchableOpacity>
+            <Text style={styles.diffToolbarTitle}>Comparison View</Text>
+            <View style={{ width: 110 }} />
+          </View>
+
+          <View style={styles.diffBody}>
+            {/* Before column */}
+            <View style={styles.diffColWrapper}>
+              <View style={[styles.diffColHeader, styles.diffColHeaderBefore]}>
+                <Text style={styles.diffColHeading}>Before</Text>
+              </View>
+              <ScrollView style={styles.diffScroll} contentContainerStyle={styles.diffScrollContent}>
+                <View style={styles.paper}>
+                  <View style={styles.pdfHeaderRow}>
+                    <View style={styles.pdfLine} />
+                    <Text style={styles.pdfFilename} numberOfLines={1}>{filename}</Text>
+                    <View style={styles.pdfLine} />
+                  </View>
+                  <Text style={styles.bodyText}>
+                    {originalSegments.map((seg, i) => {
+                      if (seg.topicIndex === null) {
+                        return <Text key={i} style={styles.bodyText}>{seg.text}</Text>;
+                      }
+                      const c = topicColor(seg.topicIndex);
+                      return (
+                        <Text key={i} style={[styles.bodyText, styles.highlight, { backgroundColor: c.bg }]}>
+                          {seg.text}
+                        </Text>
+                      );
+                    })}
+                  </Text>
+                </View>
+              </ScrollView>
+            </View>
+
+            {/* Column divider */}
+            <View style={styles.diffColDivider} />
+
+            {/* After column */}
+            <View style={styles.diffColWrapper}>
+              <View style={[styles.diffColHeader, styles.diffColHeaderAfter]}>
+                <Text style={styles.diffColHeading}>After</Text>
+              </View>
+              <ScrollView style={styles.diffScroll} contentContainerStyle={styles.diffScrollContent}>
+                <View style={styles.paper}>
+                  <View style={styles.pdfHeaderRow}>
+                    <View style={styles.pdfLine} />
+                    <Text style={styles.pdfFilename} numberOfLines={1}>{filename}</Text>
+                    <View style={styles.pdfLine} />
+                  </View>
+                  <Text style={styles.bodyText}>
+                    {submittedSegments.map((seg, i) => {
+                      if (seg.topicIndex === null) {
+                        return <Text key={i} style={styles.bodyText}>{seg.text}</Text>;
+                      }
+                      const c = topicColor(seg.topicIndex);
+                      return (
+                        <Text key={i} style={[styles.bodyText, styles.highlight, { backgroundColor: c.bg }]}>
+                          {seg.text}
+                        </Text>
+                      );
+                    })}
+                  </Text>
+                </View>
+              </ScrollView>
+            </View>
+
+            {/* Column divider */}
+            <View style={styles.diffColDivider} />
+
+            {/* Chatbot panel */}
+            <DiagnosisChatbot
+              docText={text}
+              topics={topics}
+              results={results}
+              userAnnotations={userAnnotations}
+            />
+          </View>
+        </View>
+      ) : (
+      /* ── Body: sidebar + document ── */
       <View style={styles.body}>
         {/* ── Left: topic panel ── */}
         <View style={[styles.sidebarClip, { width: sidebarWidth }]}>
@@ -506,6 +990,7 @@ export default function TopicHighlights() {
         </View>
 
         {/* ── Right: document with highlights ── */}
+        <View style={styles.docWrapper}>
         <ScrollView style={styles.docScroll} contentContainerStyle={styles.docScrollContent}>
           {/* Legend strip */}
           <ScrollView
@@ -575,7 +1060,19 @@ export default function TopicHighlights() {
             </Text>
           </View>
         </ScrollView>
+        {/* ── Submit button ── */}
+        {userAnnotations.length > 0 && (
+          <TouchableOpacity
+            style={styles.submitBtn}
+            onPress={() => setSubmitted(true)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.submitBtnText}>Submit ›</Text>
+          </TouchableOpacity>
+        )}
+        </View>
       </View>
+      )}
       {/* ── Selection → topic picker popup (web only) ── */}
       {selectionPopup !== null && Platform.OS === 'web' && (
         <View
@@ -876,5 +1373,226 @@ const styles = StyleSheet.create({
   highlight: {
     borderRadius: 2,
     paddingHorizontal: 1,
+  },
+
+  // Wrapper for right panel (positions submit button)
+  docWrapper: {
+    flex: 1,
+    position: 'relative' as any,
+  },
+
+  // Submit button — fixed bottom-right of right panel
+  submitBtn: {
+    position: 'absolute' as any,
+    bottom: 24,
+    right: 24,
+    backgroundColor: '#1A1A2E',
+    borderRadius: 8,
+    paddingHorizontal: 22,
+    paddingVertical: 11,
+    ...Platform.select({
+      web: {
+        // @ts-ignore
+        boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+        cursor: 'pointer' as any,
+      },
+    }),
+  },
+  submitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+
+  // Diff / comparison view
+  diffContainer: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  diffToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F1F3F4',
+    borderBottomWidth: 1,
+    borderBottomColor: '#D0D5DD',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  diffToolbarTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#444',
+    letterSpacing: 0.3,
+  },
+  backBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#1A1A2E',
+    borderRadius: 6,
+    ...Platform.select({ web: { cursor: 'pointer' as any } }),
+  },
+  backBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  diffBody: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  diffColWrapper: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  diffColHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+  },
+  diffColHeaderBefore: {
+    backgroundColor: '#FFF3E0',
+    borderBottomWidth: 2,
+    borderBottomColor: '#FFA726',
+  },
+  diffColHeaderAfter: {
+    backgroundColor: '#E8F5E9',
+    borderBottomWidth: 2,
+    borderBottomColor: '#66BB6A',
+  },
+  diffColHeading: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: '#555',
+    textTransform: 'uppercase' as any,
+  },
+  diffColDivider: {
+    width: 2,
+    backgroundColor: '#D0D5DD',
+    flexShrink: 0,
+  },
+  diffScroll: {
+    flex: 1,
+  },
+  diffScrollContent: {
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+});
+
+// ─── Chatbot styles ───────────────────────────────────────────────────────────
+
+const chatStyles = StyleSheet.create({
+  panel: {
+    flexShrink: 0,
+    backgroundColor: '#0F0F1A',
+    flexDirection: 'row',
+  },
+  resizeHandle: {
+    width: 8,
+    backgroundColor: '#1A1A30',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    ...Platform.select({ web: { cursor: 'col-resize' as any } }),
+  },
+  resizeHandleBar: {
+    width: 3,
+    height: 40,
+    borderRadius: 2,
+    backgroundColor: '#3E3E6E',
+  },
+  inner: {
+    flex: 1,
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: '#1A1A2E',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2E2E4E',
+  },
+  headerIcon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#4F46E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  headerTitle: {
+    color: '#E0E0FF',
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
+  },
+  typingBadge: {
+    backgroundColor: '#2E2E4E',
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  typingBadgeText: {
+    color: '#9090C0',
+    fontSize: 10,
+    fontStyle: 'italic',
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 14,
+    paddingBottom: 24,
+  },
+  thinkingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  thinkingText: {
+    color: '#9090C0',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  thinkingDots: {
+    color: '#4F46E5',
+    fontSize: 16,
+    letterSpacing: 2,
+  },
+  bubble: {
+    backgroundColor: '#1C1C30',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2E2E4E',
+    padding: 12,
+  },
+  messageText: {
+    color: '#D0D0F0',
+    fontSize: 12,
+    lineHeight: 20,
+  },
+  errorBubble: {
+    backgroundColor: '#2A0A0A',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#5C1A1A',
+    padding: 12,
+  },
+  errorText: {
+    color: '#FF8080',
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
