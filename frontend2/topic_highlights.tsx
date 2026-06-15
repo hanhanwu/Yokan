@@ -37,7 +37,7 @@ type Segment = {
   start: number; // character offset in full text
 };
 
-type UserAnnotation = { start: number; end: number; topicIndex: number };
+type UserAnnotation = { start: number; end: number; topicIndex: number | null };
 
 type SelectionPopupState = { x: number; y: number; start: number; end: number } | null;
 
@@ -389,7 +389,7 @@ export default function TopicHighlights() {
     };
   }, []);
 
-  function applyAnnotation(topicIndex: number) {
+  function applyAnnotation(topicIndex: number | null) {
     if (!selectionPopup) return;
     setUserAnnotations((prev) => [
       ...prev.filter((a) => !(a.start < selectionPopup.end && a.end > selectionPopup.start)), // remove overlapping
@@ -590,6 +590,14 @@ export default function TopicHighlights() {
         >
           <Text style={popupStyles.heading}>Assign topic colour</Text>
           <View style={popupStyles.grid}>
+            <TouchableOpacity
+              onPress={() => applyAnnotation(null)}
+              activeOpacity={0.8}
+              style={[popupStyles.topicBtn, popupStyles.decolorBtn]}
+            >
+              <View style={[popupStyles.dot, popupStyles.decolorDot]} />
+              <Text style={[popupStyles.topicBtnText, popupStyles.decolorText]}>Remove topic</Text>
+            </TouchableOpacity>
             {topics.map((topic, i) => {
               const c = topicColor(i);
               return (
@@ -680,6 +688,16 @@ const popupStyles = StyleSheet.create({
   cancelText: {
     fontSize: 12,
     color: '#888',
+  },
+  decolorBtn: {
+    backgroundColor: '#F5F5F5',
+    borderColor: '#BDBDBD',
+  },
+  decolorDot: {
+    backgroundColor: '#9E9E9E',
+  },
+  decolorText: {
+    color: '#616161',
   },
 });
 
