@@ -468,9 +468,25 @@ const mdStyles = StyleSheet.create({
 
 const GROQ_API_KEY = (process.env as any).EXPO_PUBLIC_GROQ_API_KEY ?? '';
 const GROQ_MODEL = 'openai/gpt-oss-20b';
+const GROQ_MAX_COMPLETION_TOKENS = 1024;
 // Typing speed: characters advanced per tick
 const CHARS_PER_TICK = 5;
 const TICK_MS = 28;
+
+function contentToText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part: any) => {
+        if (typeof part === 'string') return part;
+        if (typeof part?.text === 'string') return part.text;
+        if (typeof part?.content === 'string') return part.content;
+        return '';
+      })
+      .join('');
+  }
+  return '';
+}
 
 function DiagnosisChatbot({
   docText,
@@ -502,6 +518,14 @@ function DiagnosisChatbot({
     const prompt = buildPrompt(docText, topics, results, userAnnotations);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+    const requestBody = {
+      model: GROQ_MODEL,
+      stream: true,
+      max_completion_tokens: GROQ_MAX_COMPLETION_TOKENS,
+      reasoning_effort: 'low',
+      reasoning_format: 'hidden',
+      messages: [{ role: 'user', content: prompt }],
+    };
 
     // Abort if no response starts within 15 s
     const timeoutId = setTimeout(() => ctrl.abort(), 15000);
@@ -515,11 +539,7 @@ function DiagnosisChatbot({
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${GROQ_API_KEY}`,
           },
-          body: JSON.stringify({
-            model: GROQ_MODEL,
-            stream: true,
-            messages: [{ role: 'user', content: prompt }],
-          }),
+          body: JSON.stringify(requestBody),
         });
 
         if (!res.ok) {
@@ -543,7 +563,7 @@ function DiagnosisChatbot({
             if (!trimmed.startsWith('data: ')) continue;
             try {
               const json = JSON.parse(trimmed.slice(6));
-              const token: string = json.choices?.[0]?.delta?.content ?? '';
+              const token = contentToText(json.choices?.[0]?.delta?.content);
               if (token) receivedRef.current += token;
             } catch {
               // malformed chunk — skip
@@ -554,8 +574,30 @@ function DiagnosisChatbot({
         streamDoneRef.current = true;
         // Guard: if the stream completed but returned nothing, show an error
         if (!receivedRef.current) {
-          setIsTyping(false);
-          setError('No response from model. Check the model name or try again.');
+          const fallbackRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${GROQ_API_KEY}`,
+            },
+            body: JSON.stringify({ ...requestBody, stream: false }),
+          });
+
+          if (!fallbackRes.ok) {
+            const body = await fallbackRes.text();
+            throw new Error(`Groq API error ${fallbackRes.status}: ${body}`);
+          }
+
+          const fallbackJson = await fallbackRes.json();
+          const fallbackText = contentToText(fallbackJson.choices?.[0]?.message?.content);
+          if (fallbackText) {
+            receivedRef.current = fallbackText;
+          } else {
+            const finishReason = fallbackJson.choices?.[0]?.finish_reason ?? 'unknown';
+            setIsTyping(false);
+            setError(`No response from model. Finish reason: ${finishReason}.`);
+          }
         }
       } catch (err: any) {
         clearTimeout(timeoutId);
@@ -687,6 +729,7 @@ function DiagnosisChatbot({
 export default function TopicHighlights() {
   const { filename, text, topics, results } = data;
   const [activeMatch, setActiveMatch] = useState<ActiveMatch>(null);
+  const [selectedTopicIndexes, setSelectedTopicIndexes] = useState<number[]>([]);
   const [userAnnotations, setUserAnnotations] = useState<UserAnnotation[]>([]);
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -866,6 +909,14 @@ export default function TopicHighlights() {
     );
   }
 
+  function handleTopicToggle(topicIndex: number) {
+    setSelectedTopicIndexes((prev) =>
+      prev.includes(topicIndex)
+        ? prev.filter((i) => i !== topicIndex)
+        : [...prev, topicIndex]
+    );
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
@@ -1015,19 +1066,21 @@ export default function TopicHighlights() {
           >
             {topics.map((topic, i) => {
               const c = topicColor(i);
-              const active = activeMatch === null || activeMatch.topic === topic;
+              const selected = selectedTopicIndexes.length === 0 || selectedTopicIndexes.includes(i);
               return (
-                <View
+                <TouchableOpacity
                   key={topic}
+                  onPress={() => handleTopicToggle(i)}
+                  activeOpacity={0.8}
                   style={[
                     styles.legendChip,
                     { backgroundColor: c.bg, borderColor: c.border },
-                    !active && styles.legendChipDim,
+                    !selected && styles.legendChipDim,
                   ]}
                 >
                   <View style={[styles.legendDot, { backgroundColor: c.border }]} />
                   <Text style={[styles.legendChipText, { color: c.text }]}>{topic}</Text>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </ScrollView>
@@ -1046,6 +1099,20 @@ export default function TopicHighlights() {
                 // Keep ref map up to date (safe to mutate during render for web-only lookup)
                 segStartsRef.current[segId] = seg.start;
                 if (seg.topicIndex === null) {
+                  return (
+                    <Text
+                      key={i}
+                      nativeID={segId}
+                      style={styles.bodyText}
+                    >
+                      {seg.text}
+                    </Text>
+                  );
+                }
+                if (
+                  selectedTopicIndexes.length > 0 &&
+                  !selectedTopicIndexes.includes(seg.topicIndex)
+                ) {
                   return (
                     <Text
                       key={i}
