@@ -63,6 +63,96 @@ function topicColor(index: number) {
 
 type ActiveMatch = { topic: string; rank: number } | null;
 
+type HighlightInterval = { start: number; end: number; topicIndex: number; rank: number };
+
+const SENTENCE_ABBREVIATIONS = new Set([
+  'e.g',
+  'i.e',
+  'mr',
+  'mrs',
+  'ms',
+  'dr',
+  'prof',
+  'sr',
+  'jr',
+  'vs',
+  'etc',
+]);
+
+function previousToken(text: string, index: number) {
+  let i = index - 1;
+  while (i >= 0 && /\s/.test(text[i])) i -= 1;
+  let end = i + 1;
+  while (i >= 0 && /[A-Za-z.]/.test(text[i])) i -= 1;
+  return text.slice(i + 1, end).toLowerCase();
+}
+
+function nextNonSpaceIndex(text: string, index: number) {
+  let i = index;
+  while (i < text.length && /\s/.test(text[i])) i += 1;
+  return i;
+}
+
+function isSentenceEnd(text: string, index: number) {
+  const ch = text[index];
+  if (ch === '\n') return true;
+  if (ch !== '.' && ch !== '!' && ch !== '?') return false;
+
+  const token = previousToken(text, index);
+  if (SENTENCE_ABBREVIATIONS.has(token)) return false;
+  if (/\d/.test(text[index - 1] ?? '') && /\d/.test(text[index + 1] ?? '')) return false;
+
+  let afterPunctuation = index + 1;
+  while (afterPunctuation < text.length && /["')\]]/.test(text[afterPunctuation])) {
+    afterPunctuation += 1;
+  }
+
+  const next = nextNonSpaceIndex(text, afterPunctuation);
+  if (next >= text.length) return true;
+  return /[\nA-Z0-9]/.test(text[next]);
+}
+
+function sentenceEndIndex(text: string, index: number) {
+  let end = index + 1;
+  while (end < text.length && /["')\]]/.test(text[end])) end += 1;
+  return end;
+}
+
+function expandToSentenceBounds(fullText: string, start: number, end: number) {
+  const safeStart = Math.max(0, Math.min(start, fullText.length));
+  const safeEnd = Math.max(safeStart, Math.min(end, fullText.length));
+
+  let expandedStart = safeStart;
+  for (let i = safeStart - 1; i >= 0; i -= 1) {
+    if (isSentenceEnd(fullText, i)) {
+      expandedStart = i + 1;
+      break;
+    }
+  }
+  while (expandedStart < safeStart && /\s/.test(fullText[expandedStart])) expandedStart += 1;
+
+  let expandedEnd = safeEnd;
+  let endProbe = safeEnd - 1;
+  while (endProbe >= safeStart && /\s/.test(fullText[endProbe])) endProbe -= 1;
+  if (endProbe >= safeStart && isSentenceEnd(fullText, endProbe)) {
+    expandedEnd = sentenceEndIndex(fullText, endProbe);
+  } else {
+    for (let i = Math.max(safeEnd, 0); i < fullText.length; i += 1) {
+      if (isSentenceEnd(fullText, i)) {
+        expandedEnd = sentenceEndIndex(fullText, i);
+        break;
+      }
+    }
+  }
+
+  return { start: expandedStart, end: expandedEnd };
+}
+
+function expandInterval(fullText: string, interval: HighlightInterval): HighlightInterval {
+  const bounds = expandToSentenceBounds(fullText, interval.start, interval.end);
+  return { ...interval, ...bounds };
+}
+
 // ─── Build document segments ──────────────────────────────────────────────────
 // When activeMatch is set, highlight only that one span.
 // When null, highlight all spans (highest-rrf wins on overlap).
@@ -75,24 +165,25 @@ function buildSegments(
   userAnnotations: UserAnnotation[] = [],
 ): Segment[] {
   // Build base intervals
-  let baseIntervals: { start: number; end: number; topicIndex: number; rank: number }[] = [];
+  let baseIntervals: HighlightInterval[] = [];
 
   if (activeMatch !== null) {
     const matches = results[activeMatch.topic] ?? [];
     const match = matches.find((m) => m.rank === activeMatch.rank);
     if (match) {
       const topicIndex = topics.indexOf(activeMatch.topic);
-      baseIntervals = [{ start: match.start, end: match.end, topicIndex, rank: match.rank }];
+      baseIntervals = [expandInterval(fullText, { start: match.start, end: match.end, topicIndex, rank: match.rank })];
     }
   } else {
     const spanMap: Map<string, { topicIndex: number; rank: number; end: number }> = new Map();
     topics.forEach((topic, tIdx) => {
       const matches = results[topic] ?? [];
       matches.forEach((m) => {
-        const key = `${m.start}`;
+        const expanded = expandToSentenceBounds(fullText, m.start, m.end);
+        const key = `${expanded.start}`;
         const existing = spanMap.get(key);
         if (!existing || m.rank < existing.rank || (m.rank === existing.rank && tIdx < existing.topicIndex)) {
-          spanMap.set(key, { topicIndex: tIdx, rank: m.rank, end: m.end });
+          spanMap.set(key, { topicIndex: tIdx, rank: m.rank, end: expanded.end });
         }
       });
     });
