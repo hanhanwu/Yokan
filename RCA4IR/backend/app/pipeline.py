@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 import numpy as np
@@ -16,6 +18,9 @@ from .data import load_fiqa_documents
 from .embeddings import EmbeddingModel
 from .models import Chunk, QueryResult
 from .retriever import HybridRetriever
+
+# Lazy-initialized Groq client — created once, reused across requests.
+_groq_client: Any = None
 
 
 class RAGPipeline:
@@ -154,15 +159,15 @@ class RAGPipeline:
 
 
 def _groq_answer(question: str, retrieved: list[Any], model: str) -> str:
-    import os
-    from groq import Groq
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY environment variable is required for Groq answer generation")
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY environment variable is required for Groq answer generation")
+        _groq_client = Groq(api_key=api_key)
     context = "\n\n".join(chunk.text for chunk in retrieved) if retrieved else ""
-    client = Groq(api_key=api_key)
-    response = client.chat.completions.create(
+    response = _groq_client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": "Answer the question using only the provided context. Be concise and accurate. If the context does not contain enough information, say so explicitly."},

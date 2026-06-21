@@ -8,7 +8,7 @@ FastAPI RAG backend for root cause analysis experiments in information retrieval
 - YAML-configurable chunking, embeddings, hybrid search weights, and top-k.
 - Cached embedding indexes in `data/cache`, so repeated queries do not re-embed.
 - Hybrid retrieval with semantic cosine search plus keyword TF-IDF search.
-- Extractive answer generation by default, with an OpenAI placeholder method in config for later.
+- Extractive answer generation as fallback; Groq (`openai/gpt-oss-20b`) as the active answer generation method (requires `GROQ_API_KEY` in `.env`).
 
 ## Run
 

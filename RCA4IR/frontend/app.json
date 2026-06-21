@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "RCA4IR",
+    "slug": "rca4ir",
+    "version": "1.0.0",
+    "platforms": ["web"],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    }
+  }
+}

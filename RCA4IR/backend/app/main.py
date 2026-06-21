@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .config import load_config
+from .evaluation import build_pr_curve
 from .pipeline import RAGPipeline
 
 
@@ -20,6 +21,23 @@ app.add_middleware(
 )
 
 BASE_CONFIG = load_config()
+
+# In-memory pipeline cache — avoids reloading embeddings from disk on every request.
+# Key: (serialized config, local_data_path)
+_pipeline_cache: dict[tuple[str, str | None], RAGPipeline] = {}
+
+
+def _get_pipeline(
+    config: RAGConfig,
+    local_data_path: str | None = None,
+    force_rebuild: bool = False,
+) -> RAGPipeline:
+    key = (str(config.model_dump()), local_data_path)
+    if force_rebuild or key not in _pipeline_cache:
+        pipeline = RAGPipeline(config, local_data_path=local_data_path)
+        pipeline.build_or_load_index(force_rebuild=force_rebuild)
+        _pipeline_cache[key] = pipeline
+    return _pipeline_cache[key]
 
 
 class BuildIndexRequest(BaseModel):
@@ -48,19 +66,30 @@ def get_config() -> dict[str, Any]:
 @app.post("/index")
 def build_index(request: BuildIndexRequest) -> dict[str, Any]:
     config = BASE_CONFIG.with_overrides(request.overrides)
-    pipeline = RAGPipeline(config, local_data_path=request.local_data_path)
+    pipeline = _get_pipeline(config, request.local_data_path, force_rebuild=request.force_rebuild)
     return pipeline.build_or_load_index(force_rebuild=request.force_rebuild)
 
 
 @app.post("/query")
 def query(request: QueryRequest) -> dict[str, Any]:
     config = BASE_CONFIG.with_overrides(request.overrides)
-    pipeline = RAGPipeline(config, local_data_path=request.local_data_path)
-    pipeline.build_or_load_index(force_rebuild=request.force_rebuild)
+    pipeline = _get_pipeline(config, request.local_data_path, force_rebuild=request.force_rebuild)
     return pipeline.query(request.question).model_dump()
 
 
 @app.get("/sample-questions")
 def sample_questions() -> list[dict[str, Any]]:
-    pipeline = RAGPipeline(BASE_CONFIG)
-    return pipeline.sample_questions()
+    return _get_pipeline(BASE_CONFIG).sample_questions()
+
+
+@app.get("/evaluate")
+def evaluate() -> dict[str, Any]:
+    """Run retrieval-only evaluation on the baseline config and return PR curve data."""
+    pipeline = _get_pipeline(BASE_CONFIG)
+    recalls, precisions, ap = build_pr_curve(pipeline, pipeline.qa_rows)
+    return {
+        "recalls": recalls,
+        "precisions": precisions,
+        "ap": ap,
+        "config": BASE_CONFIG.model_dump(),
+    }

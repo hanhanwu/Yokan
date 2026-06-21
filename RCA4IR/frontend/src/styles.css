@@ -198,6 +198,95 @@ code {
     display: block;
   }
 
+/* ── Baseline Performance Panel ── */
+
+.perfPanel {
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid #d5d0c7;
+  border-radius: 10px;
+  background: #fffdfa;
+}
+
+.perfTitle {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: #172026;
+}
+
+.evalStatus {
+  font-size: 13px;
+  color: #637078;
+  margin: 0;
+}
+
+.perfBody {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.prChartWrap {
+  flex-shrink: 0;
+}
+
+.prSvg {
+  display: block;
+}
+
+.configWrap {
+  flex: 1;
+  min-width: 260px;
+}
+
+.configGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.configGroup {
+  background: #f4f2ed;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.configGroupTitle {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #287c73;
+  margin: 0 0 8px 0;
+}
+
+.configDl {
+  margin: 0;
+}
+
+.configRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.configRow dt {
+  color: #637078;
+  white-space: nowrap;
+}
+
+.configRow dd {
+  margin: 0;
+  font-weight: 600;
+  color: #172026;
+  text-align: right;
+  word-break: break-all;
+}
+
   .iconButton {
     margin-top: 12px;
   }
