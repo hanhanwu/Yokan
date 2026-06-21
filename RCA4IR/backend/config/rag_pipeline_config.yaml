@@ -1,0 +1,40 @@
+dataset:
+  name: fiqa
+  hf_dataset: explodinggradients/fiqa
+  hf_config: ragas_eval
+  hf_split: baseline
+  # Keep the POC quick; raise this when you want a larger cached index.
+  sample_limits: [25, 100]
+  active_sample_limit: 25
+
+chunking:
+  methods: [fixed_words, sentence_window]
+  active_method: fixed_words
+  chunk_sizes: [120, 220]
+  active_chunk_size: 120
+  chunk_overlaps: [20, 40]
+  active_chunk_overlap: 20
+
+embeddings:
+  # sklearn-hashing is fully local and free. all-MiniLM is free but downloads
+  # from Hugging Face the first time unless already cached.
+  models: [sklearn-hashing, sentence-transformers/all-MiniLM-L6-v2]
+  active_model: sklearn-hashing
+  dimensions:
+    sklearn-hashing: 384
+    sentence-transformers/all-MiniLM-L6-v2: 384
+
+hybrid_search:
+  semantic_weights: [0.60, 0.85]
+  active_semantic_weight: 0.60
+  keyword_weights: [0.40, 0.15]
+  active_keyword_weight: 0.40
+  top_k_values: [3, 5]
+  active_top_k: 3
+
+answer_generation:
+  methods: [extractive, groq:openai/gpt-oss-20b]
+  active_method: groq:openai/gpt-oss-20b
+
+cache:
+  index_dir: data/cache
