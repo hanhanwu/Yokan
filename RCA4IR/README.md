@@ -2,6 +2,7 @@
 
 POC for root cause analysis for information retrieval. The first implementation focuses on a configurable FIQA RAG pipeline:
 
+- `source /Users/hanhanwu/Documents/Github/Yokan/RCA4IR/backend/.venv/bin/activate`
 - Python FastAPI backend in `backend/`.
   - `uvicorn app.main:app --reload --port 8000`
 - TypeScript UI scaffold in `frontend/`.

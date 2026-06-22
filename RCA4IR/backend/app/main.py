@@ -77,6 +77,19 @@ def query(request: QueryRequest) -> dict[str, Any]:
     return pipeline.query(request.question).model_dump()
 
 
+class EvaluateRequest(BaseModel):
+    overrides: dict[str, Any] | None = None
+
+
+@app.post("/evaluate")
+def evaluate_custom(request: EvaluateRequest) -> dict[str, Any]:
+    """Run retrieval-only evaluation with optional config overrides and return PR curve data."""
+    config = BASE_CONFIG.with_overrides(request.overrides)
+    pipeline = _get_pipeline(config)
+    recalls, precisions, ap = build_pr_curve(pipeline, pipeline.qa_rows)
+    return {"recalls": recalls, "precisions": precisions, "ap": ap}
+
+
 @app.get("/sample-questions")
 def sample_questions() -> list[dict[str, Any]]:
     return _get_pipeline(BASE_CONFIG).sample_questions()
