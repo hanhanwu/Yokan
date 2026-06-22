@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "./styles.css";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -7,6 +7,16 @@ type EvalData = {
   recalls: number[];
   precisions: number[];
   ap: number;
+};
+
+type LogEntry = {
+  step: number;
+  label: string;
+  ap: number;
+  recalls: number[];
+  precisions: number[];
+  action: "baseline" | "approved" | "rejected";
+  overrides: Record<string, any>;
 };
 
 type ChartEntry = {
@@ -59,11 +69,25 @@ function App() {
   const [charts, setCharts] = useState<ChartEntry[]>([]);
   const [pendingChart, setPendingChart] = useState<ChartEntry | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [pendingStep, setPendingStep] = useState<number>(0);
   const [isRunning, setIsRunning] = useState(false);
   const [statusMsg, setStatusMsg] = useState("Loading baseline…");
   const [activeOverrides, setActiveOverrides] = useState<Record<string, any>>({});
   const [usedKeys, setUsedKeys] = useState<string[]>([]);
   const [rejectedKeys, setRejectedKeys] = useState<string[]>([]);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const logRef = useRef<LogEntry[]>([]);
+
+  function addLogEntry(entry: LogEntry) {
+    const updated = [...logRef.current, entry];
+    logRef.current = updated;
+    setLogEntries([...updated]);
+    fetch(`${API_BASE}/log-step`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    }).catch(() => {});
+  }
 
   useEffect(() => {
     fetch(`${API_BASE}/evaluate`)
@@ -74,6 +98,7 @@ function App() {
       .then((data: EvalData) => {
         setCharts([{ id: "baseline", recalls: data.recalls, precisions: data.precisions, ap: data.ap, label: "Baseline" }]);
         setStatusMsg("");
+        addLogEntry({ step: 0, label: "Baseline", ap: data.ap, recalls: data.recalls, precisions: data.precisions, action: "baseline", overrides: {} });
       })
       .catch((err) => setStatusMsg(`Failed to load baseline: ${err.message}`));
   }, []);
@@ -88,13 +113,13 @@ function App() {
     const newCharts = [...charts, pendingChart];
     const newUsedKeys = [...usedKeys, pendingKey];
     const newOverrides = mergeOverrides(activeOverrides, imp.overrides);
+    addLogEntry({ step: pendingStep, label: pendingChart.label, ap: pendingChart.ap, recalls: pendingChart.recalls, precisions: pendingChart.precisions, action: "approved", overrides: newOverrides });
     setCharts(newCharts);
     setActiveOverrides(newOverrides);
     setUsedKeys(newUsedKeys);
     setRejectedKeys([]);
     setPendingChart(null);
     setPendingKey(null);
-    // Auto-run next improvement if limit not reached
     if (newCharts.length < 3) {
       const next = IMPROVEMENTS.find((i) => !newUsedKeys.includes(i.key));
       if (next) triggerImprovement(newOverrides, newUsedKeys, []);
@@ -102,26 +127,24 @@ function App() {
   }
 
   function reject() {
-    if (!pendingKey) return;
+    if (!pendingKey || !pendingChart) return;
     const newRejectedKeys = [...rejectedKeys, pendingKey];
+    addLogEntry({ step: pendingStep, label: pendingChart.label, ap: pendingChart.ap, recalls: pendingChart.recalls, precisions: pendingChart.precisions, action: "rejected", overrides: activeOverrides });
     setRejectedKeys(newRejectedKeys);
     setPendingChart(null);
     setPendingKey(null);
-    // Auto-run next improvement with same base config
     if (charts.length < 3) {
       const next = IMPROVEMENTS.find((i) => !usedKeys.includes(i.key) && !newRejectedKeys.includes(i.key));
       if (next) triggerImprovement(activeOverrides, usedKeys, newRejectedKeys);
     }
   }
 
-  async function triggerImprovement(
-    overrides: Record<string, any>,
-    used: string[],
-    rejected: string[]
-  ) {
+  async function triggerImprovement(overrides: Record<string, any>, used: string[], rejected: string[]) {
     const next = IMPROVEMENTS.find((imp) => !used.includes(imp.key) && !rejected.includes(imp.key));
     if (!next) return;
+    const step = logRef.current.length;
     setIsRunning(true);
+    setPendingStep(step);
     setStatusMsg(`Trying: ${next.label}…`);
     try {
       const newOverrides = mergeOverrides(overrides, next.overrides);
@@ -144,6 +167,7 @@ function App() {
 
   const hasMore = IMPROVEMENTS.some((imp) => !usedKeys.includes(imp.key) && !rejectedKeys.includes(imp.key));
   const canImprove = charts.length > 0 && charts.length < 3 && !pendingChart && !isRunning && hasMore;
+  const isDone = !isRunning && !pendingChart && charts.length > 0 && (charts.length >= 3 || !hasMore);
   const visibleCharts = pendingChart ? [...charts, pendingChart] : charts;
 
   return (
@@ -200,8 +224,22 @@ function App() {
             ▶ Run Self Improvement
           </button>
         )}
-        {!isRunning && !pendingChart && charts.length > 0 && (charts.length >= 3 || !hasMore) && (
-          <p className="doneMsg">Done!</p>
+
+        {isDone && logEntries.length > 0 && (
+          <div className="learningSection">
+            <h2 className="learningTitle">Learning Graph</h2>
+            <LearningGraph entries={logEntries} />
+            <div className="learningLegend">
+              {logEntries.map((e) => (
+                <div key={`${e.step}-${e.action}`} className="legendItem">
+                  <span className="legendStep">Step {e.step}</span>
+                  <span className="legendLabel">{e.label}</span>
+                  <span className="legendAP">AP = {e.ap.toFixed(4)}</span>
+                  <span className={`legendBadge legendBadge--${e.action}`}>{e.action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </section>
     </main>
@@ -265,6 +303,69 @@ function PRCurve({ recalls, precisions, ap }: { recalls: number[]; precisions: n
       <text x={W / 2} y={H - 2} textAnchor="middle" fontSize="10" fill="#4a555c">Recall</text>
       <text x={10} y={PAD_T + plotH / 2} textAnchor="middle" fontSize="10" fill="#4a555c"
         transform={`rotate(-90, 10, ${PAD_T + plotH / 2})`}>Precision</text>
+    </svg>
+  );
+}
+
+// ── Learning Graph ────────────────────────────────────────────────────────────
+
+function LearningGraph({ entries }: { entries: LogEntry[] }) {
+  const W = 540, H = 240, PAD_L = 52, PAD_R = 24, PAD_T = 32, PAD_B = 36;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_T - PAD_B;
+
+  if (entries.length === 0) return null;
+
+  const maxStep = Math.max(...entries.map((e) => e.step));
+  const toX = (s: number) => PAD_L + (maxStep === 0 ? 0.5 : s / maxStep) * plotW;
+  const toY = (ap: number) => PAD_T + (1 - ap) * plotH;
+
+  const approvedEntries = entries.filter((e) => e.action === "baseline" || e.action === "approved");
+  const approvedLine = approvedEntries.map((e) => `${toX(e.step).toFixed(1)},${toY(e.ap).toFixed(1)}`).join(" ");
+  const stepSet = Array.from(new Set(entries.map((e) => e.step))).sort((a, b) => a - b);
+  const yTicks = [0, 0.25, 0.5, 0.75, 1.0];
+
+  return (
+    <svg width={W} height={H} className="learningSvg">
+      {yTicks.map((t) => (
+        <g key={t}>
+          <line x1={PAD_L} y1={toY(t)} x2={PAD_L + plotW} y2={toY(t)} stroke="#e5e1d8" strokeWidth="1" />
+          <line x1={PAD_L - 4} y1={toY(t)} x2={PAD_L} y2={toY(t)} stroke="#9ba8ad" />
+          <text x={PAD_L - 6} y={toY(t) + 3} textAnchor="end" fontSize="9" fill="#637078">{t.toFixed(2)}</text>
+        </g>
+      ))}
+      {approvedEntries.length > 1 && (
+        <polyline points={approvedLine} fill="none" stroke="#e07a39" strokeWidth="2.5" strokeLinejoin="round" />
+      )}
+      {entries.map((e) => {
+        const cx = toX(e.step), cy = toY(e.ap), d = 6;
+        if (e.action === "rejected") {
+          return (
+            <g key={`${e.step}-r`}>
+              <line x1={cx - d} y1={cy - d} x2={cx + d} y2={cy + d} stroke="#9ba8ad" strokeWidth="2.5" strokeLinecap="round" />
+              <line x1={cx + d} y1={cy - d} x2={cx - d} y2={cy + d} stroke="#9ba8ad" strokeWidth="2.5" strokeLinecap="round" />
+              <text x={cx} y={cy - 10} textAnchor="middle" fontSize="9" fill="#9ba8ad">{e.ap.toFixed(3)}</text>
+            </g>
+          );
+        }
+        return (
+          <g key={`${e.step}-a`}>
+            <circle cx={cx} cy={cy} r={6} fill="#e07a39" />
+            <text x={cx} y={cy - 10} textAnchor="middle" fontSize="9" fontWeight="700" fill="#e07a39">{e.ap.toFixed(3)}</text>
+          </g>
+        );
+      })}
+      <line x1={PAD_L} y1={toY(0)} x2={PAD_L + plotW + 8} y2={toY(0)} stroke="#9ba8ad" strokeWidth="1.5" />
+      <line x1={PAD_L} y1={toY(0) + 2} x2={PAD_L} y2={PAD_T} stroke="#9ba8ad" strokeWidth="1.5" />
+      {stepSet.map((s) => (
+        <g key={`xt-${s}`}>
+          <line x1={toX(s)} y1={toY(0)} x2={toX(s)} y2={toY(0) + 4} stroke="#9ba8ad" />
+          <text x={toX(s)} y={toY(0) + 14} textAnchor="middle" fontSize="9" fill="#637078">Step {s}</text>
+        </g>
+      ))}
+      <text x={PAD_L + plotW / 2} y={H - 2} textAnchor="middle" fontSize="10" fill="#4a555c">Attempt</text>
+      <text x={10} y={PAD_T + plotH / 2} textAnchor="middle" fontSize="10" fill="#4a555c"
+        transform={`rotate(-90, 10, ${PAD_T + plotH / 2})`}>AP</text>
     </svg>
   );
 }

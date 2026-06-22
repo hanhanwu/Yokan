@@ -183,12 +183,69 @@ h1 { font-size: 32px; line-height: 1.1; }
 
 .improveBtn:hover { background: #263038; }
 
-/* ── Done message ── */
+/* ── Done / Learning section ── */
 
-.doneMsg {
-  text-align: center;
-  font-size: 32px;
-  font-weight: 700;
-  color: #172026;
-  margin-top: 20px;
+.learningSection {
+  margin-top: 28px;
 }
+
+.learningTitle {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 14px 0;
+  color: #172026;
+}
+
+.learningSvg {
+  display: block;
+  margin-bottom: 16px;
+}
+
+/* ── Legend ── */
+
+.learningLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 560px;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #f8f6f2;
+}
+
+.legendStep {
+  font-weight: 700;
+  width: 48px;
+  flex-shrink: 0;
+  color: #172026;
+}
+
+.legendLabel {
+  flex: 1;
+  color: #172026;
+}
+
+.legendAP {
+  font-weight: 600;
+  color: #e07a39;
+  flex-shrink: 0;
+}
+
+.legendBadge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.legendBadge--baseline { background: #172026; color: #fff; }
+.legendBadge--approved { background: #e07a39; color: #fff; }
+.legendBadge--rejected { background: #e8e4dc; color: #637078; }

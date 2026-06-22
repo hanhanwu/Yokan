@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -9,6 +12,8 @@ from pydantic import BaseModel, Field
 from .config import load_config
 from .evaluation import build_pr_curve
 from .pipeline import RAGPipeline
+
+LOG_FILE = Path(__file__).resolve().parents[1] / "data" / "learning_log.json"
 
 
 app = FastAPI(title="RCA4IR RAG POC", version="0.1.0")
@@ -106,3 +111,36 @@ def evaluate() -> dict[str, Any]:
         "ap": ap,
         "config": BASE_CONFIG.model_dump(),
     }
+
+
+class LogStepRequest(BaseModel):
+    step: int
+    label: str
+    ap: float
+    recalls: list[float]
+    precisions: list[float]
+    action: str  # "baseline" | "approved" | "rejected"
+    overrides: dict[str, Any] | None = None
+
+
+@app.post("/log-step")
+def log_step(request: LogStepRequest) -> dict[str, str]:
+    """Persist one improvement step to the learning log file."""
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, Any]] = []
+    if request.step != 0 and LOG_FILE.exists():
+        entries = json.loads(LOG_FILE.read_text(encoding="utf-8"))
+    entries.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **request.model_dump(),
+    })
+    LOG_FILE.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"status": "logged"}
+
+
+@app.get("/learning-log")
+def get_learning_log() -> list[dict[str, Any]]:
+    """Return the full learning log from disk."""
+    if not LOG_FILE.exists():
+        return []
+    return json.loads(LOG_FILE.read_text(encoding="utf-8"))
