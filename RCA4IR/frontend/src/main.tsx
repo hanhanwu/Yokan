@@ -180,8 +180,7 @@ function App() {
     <main className="shell">
       <section className="workspace">
         <div className="toolbar">
-          <h1>RCA4IR</h1>
-          <p>FIQA retrieval diagnostics</p>
+          <h1>Learning Root Causes for Retriever</h1>
         </div>
 
         {statusMsg && <p className="statusMsg">{statusMsg}</p>}
@@ -235,18 +234,20 @@ function App() {
           <div className="learningSection">
             <h2 className="learningTitle">Learning Graph</h2>
             <div className="learningGraphs">
-              <LearningGraph entries={logEntries} />
-              <DecisionTree entries={logEntries} />
-            </div>
-            <div className="learningLegend">
-              {logEntries.map((e) => (
-                <div key={`${e.step}-${e.action}`} className="legendItem">
-                  <span className="legendStep">Step {e.step}</span>
-                  <span className="legendLabel">{e.label}</span>
-                  <span className="legendAP">AP = {e.ap.toFixed(4)}</span>
-                  <span className={`legendBadge legendBadge--${e.action}`}>{e.action}</span>
+              <div className="learningLineCol">
+                <LearningGraph entries={logEntries} />
+                <div className="learningLegend">
+                  {logEntries.map((e) => (
+                    <div key={`${e.step}-${e.action}`} className="legendItem">
+                      <span className="legendStep">Step {e.step}</span>
+                      <span className="legendLabel">{e.label}</span>
+                      <span className="legendAP">AP = {e.ap.toFixed(4)}</span>
+                      <span className={`legendBadge legendBadge--${e.action}`}>{e.action}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+              <DecisionTree entries={logEntries} />
             </div>
           </div>
         )}

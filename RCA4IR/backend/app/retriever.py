@@ -4,8 +4,22 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import normalize
 
-from .embeddings import EmbeddingModel
+from .embeddings import EmbeddingModel, _best_device
 from .models import Chunk, RetrievedChunk
+
+
+def _sem_matmul(chunk_emb: np.ndarray, query_emb: np.ndarray) -> np.ndarray:
+    """Cosine similarity via matmul. Uses MPS/CUDA if torch is available, else numpy."""
+    try:
+        import torch
+        device = _best_device()
+        if device in ("mps", "cuda"):
+            c = torch.from_numpy(chunk_emb).to(device)
+            q = torch.from_numpy(query_emb).to(device)
+            return (c @ q.T).cpu().numpy()
+    except (ImportError, Exception):
+        pass
+    return chunk_emb @ query_emb.T
 
 
 class HybridRetriever:
@@ -29,7 +43,7 @@ class HybridRetriever:
 
     def retrieve(self, query: str) -> list[RetrievedChunk]:
         query_embedding = normalize(self.embedding_model.encode([query]), norm="l2")
-        semantic_scores = (self.embeddings @ query_embedding.T).reshape(-1)
+        semantic_scores = _sem_matmul(self.embeddings, query_embedding).reshape(-1)
 
         query_keyword = self.keyword_vectorizer.transform([query])
         keyword_scores = (self.keyword_matrix @ query_keyword.T).toarray().reshape(-1)
@@ -65,8 +79,8 @@ class HybridRetriever:
         """
         # (n_queries, dim)
         all_q_emb = normalize(self.embedding_model.encode(queries), norm="l2")
-        # (n_chunks, n_queries)
-        sem_matrix = self.embeddings @ all_q_emb.T
+        # (n_chunks, n_queries) — MPS/CUDA accelerated when available
+        sem_matrix = _sem_matmul(self.embeddings, all_q_emb)
         q_tfidf = self.keyword_vectorizer.transform(queries)
         kw_matrix = (self.keyword_matrix @ q_tfidf.T).toarray()
 

@@ -7,6 +7,19 @@ from sklearn.feature_extraction.text import HashingVectorizer
 from sklearn.preprocessing import normalize
 
 
+def _best_device() -> str:
+    """Return 'mps' on Apple Silicon, 'cuda' if available, else 'cpu'."""
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            return "mps"
+        if torch.cuda.is_available():
+            return "cuda"
+    except ImportError:
+        pass
+    return "cpu"
+
+
 class EmbeddingModel:
     def __init__(self, model_name: str, dimensions: int = 384):
         self.model_name = model_name
@@ -30,8 +43,14 @@ class EmbeddingModel:
 
             if self._model is None:
                 name = self.model_name.replace("sentence-transformers/", "", 1)
-                self._model = SentenceTransformer(name)
-            return self._model.encode(texts, normalize_embeddings=True).astype(np.float32)
+                device = _best_device()
+                self._model = SentenceTransformer(name, device=device)
+            return self._model.encode(
+                texts,
+                normalize_embeddings=True,
+                batch_size=64,
+                show_progress_bar=False,
+            ).astype(np.float32)
 
         if self.model_name.startswith("openai:") or self.model_name.startswith("text-embedding"):
             from openai import OpenAI
