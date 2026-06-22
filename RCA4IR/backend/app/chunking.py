@@ -17,6 +17,10 @@ def chunk_documents(
             texts = _fixed_word_chunks(document.text, chunk_size, chunk_overlap)
         elif method == "sentence_window":
             texts = _sentence_window_chunks(document.text, chunk_size, chunk_overlap)
+        elif method == "paragraph":
+            texts = _paragraph_chunks(document.text, chunk_size, chunk_overlap)
+        elif method == "sliding_sentence":
+            texts = _sliding_sentence_chunks(document.text, chunk_size, chunk_overlap)
         else:
             raise ValueError(f"Unsupported chunking method: {method}")
 
@@ -60,6 +64,49 @@ def _sentence_window_chunks(text: str, chunk_size: int, chunk_overlap: int) -> l
     if current:
         chunks.append(" ".join(current))
     return chunks
+
+
+def _paragraph_chunks(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """Split on blank lines; further split any paragraph exceeding chunk_size words."""
+    raw = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+    if not raw:
+        return _fixed_word_chunks(text, chunk_size, chunk_overlap)
+
+    chunks: list[str] = []
+    for para in raw:
+        if len(para.split()) <= chunk_size:
+            chunks.append(para)
+        else:
+            chunks.extend(_sentence_window_chunks(para, chunk_size, chunk_overlap))
+    return chunks or _fixed_word_chunks(text, chunk_size, chunk_overlap)
+
+
+def _sliding_sentence_chunks(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """1-sentence stride sliding window; window grows until chunk_size words."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    if len(sentences) <= 1:
+        return _fixed_word_chunks(text, chunk_size, chunk_overlap)
+
+    word_counts = [len(s.split()) for s in sentences]
+    chunks: list[str] = []
+    seen: set[str] = set()
+
+    for start in range(len(sentences)):
+        current_words = 0
+        end = start
+        while end < len(sentences) and current_words + word_counts[end] <= chunk_size:
+            current_words += word_counts[end]
+            end += 1
+        if end == start:
+            end = start + 1  # always include at least one sentence
+        chunk = " ".join(sentences[start:end])
+        if chunk not in seen:
+            chunks.append(chunk)
+            seen.add(chunk)
+        if end >= len(sentences):
+            break
+
+    return chunks or _fixed_word_chunks(text, chunk_size, chunk_overlap)
 
 
 def _tail_words(sentences: list[str], overlap: int) -> list[str]:

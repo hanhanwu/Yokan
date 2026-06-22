@@ -101,6 +101,13 @@ class RAGPipeline:
         assert self.retriever is not None
         return self.retriever.retrieve(question)
 
+    def retrieve_batch(self, questions: list[str]) -> list[list[Any]]:
+        """Batch-encode all questions and retrieve in one vectorized pass."""
+        if self.retriever is None:
+            self.build_or_load_index()
+        assert self.retriever is not None
+        return self.retriever.retrieve_batch(questions)
+
     def sample_questions(self) -> list[dict[str, Any]]:
         if not self.qa_rows:
             self.build_or_load_index()

@@ -41,7 +41,11 @@ class EmbeddingModel:
                 raise RuntimeError("OPENAI_API_KEY is required for OpenAI embeddings")
             model = self.model_name.replace("openai:", "", 1)
             client = OpenAI(api_key=api_key)
-            response = client.embeddings.create(model=model, input=texts)
+            # text-embedding-3-* supports a `dimensions` param for reduced-size vectors
+            kwargs: dict = {"model": model, "input": texts}
+            if "text-embedding-3" in model and self.dimensions:
+                kwargs["dimensions"] = self.dimensions
+            response = client.embeddings.create(**kwargs)
             return np.array([item.embedding for item in response.data], dtype=np.float32)
 
         raise ValueError(f"Unsupported embedding model: {self.model_name}")

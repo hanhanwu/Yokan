@@ -71,21 +71,13 @@ def build_pr_curve(
     """
     Build a macro-averaged precision-recall curve by varying rank cutoff k (no LLM calls).
 
-    For each question, at rank k:
-      - recall@k  = 1.0 if the correct doc_id appears in top-k, else 0.0 (binary relevance)
-      - precision@k = relevant_count_in_top_k / k
-
-    Points are macro-averaged across all questions at each k, then prepended with the
-    conventional (recall=0, precision=1) anchor.
-
-    Returns:
-        recalls    – list of macro-averaged recall values (length = top_k + 1)
-        precisions – list of macro-averaged precision values (length = top_k + 1)
-        ap         – area under the curve via the trapezoidal rule
+    Batch-encodes all questions in one pass for speed, then vectorizes scoring.
     """
+    questions = [qa["question"] for qa in qa_rows]
+    batch_chunks = pipeline.retrieve_batch(questions)
+
     all_q_points: list[list[tuple[float, float]]] = []
-    for qa in qa_rows:
-        chunks = pipeline.retrieve(qa["question"])
+    for qa, chunks in zip(qa_rows, batch_chunks):
         gt_doc_id = qa["doc_id"]
         relevant_so_far = 0
         q_points: list[tuple[float, float]] = []

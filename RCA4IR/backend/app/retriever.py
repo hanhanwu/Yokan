@@ -55,6 +55,45 @@ class HybridRetriever:
             for index in ranked
         ]
 
+    def retrieve_batch(self, queries: list[str]) -> list[list[RetrievedChunk]]:
+        """Encode all queries in one batched call, then vectorize scoring.
+
+        Much faster than calling retrieve() N times when using neural embedding
+        models (sentence-transformers, OpenAI) because:
+          - One forward pass through the model for all N queries instead of N passes.
+          - One BLAS matmul (n_chunks × n_queries) instead of N separate dot products.
+        """
+        # (n_queries, dim)
+        all_q_emb = normalize(self.embedding_model.encode(queries), norm="l2")
+        # (n_chunks, n_queries)
+        sem_matrix = self.embeddings @ all_q_emb.T
+        q_tfidf = self.keyword_vectorizer.transform(queries)
+        kw_matrix = (self.keyword_matrix @ q_tfidf.T).toarray()
+
+        total_weight = self.semantic_weight + self.keyword_weight
+        sem_w = self.semantic_weight / total_weight
+        kw_w = self.keyword_weight / total_weight
+
+        results: list[list[RetrievedChunk]] = []
+        for i in range(len(queries)):
+            sem_norm = _minmax(sem_matrix[:, i])
+            kw_norm  = _minmax(kw_matrix[:, i])
+            combined = sem_w * sem_norm + kw_w * kw_norm
+            ranked   = np.argsort(combined)[::-1][: self.top_k]
+            results.append([
+                RetrievedChunk(
+                    chunk_id=self.chunks[idx].chunk_id,
+                    doc_id=self.chunks[idx].doc_id,
+                    text=self.chunks[idx].text,
+                    metadata=self.chunks[idx].metadata,
+                    score=_clip01(combined[idx]),
+                    semantic_score=_clip01(sem_norm[idx]),
+                    keyword_score=_clip01(kw_norm[idx]),
+                )
+                for idx in ranked
+            ])
+        return results
+
 
 def _minmax(scores: np.ndarray) -> np.ndarray:
     if scores.size == 0:

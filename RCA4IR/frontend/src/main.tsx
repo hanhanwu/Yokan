@@ -36,21 +36,25 @@ const API_BASE: string =
 // ── Improvement candidates (tried one at a time) ───────────────────────────────
 
 const IMPROVEMENTS: { key: string; overrides: Record<string, any>; label: string }[] = [
-  {
-    key: "chunking",
-    overrides: { chunking: { active_method: "sentence_window" } },
-    label: "chunking: fixed_words → sentence_window",
-  },
-  {
-    key: "top_k",
-    overrides: { hybrid_search: { active_top_k: 5 } },
-    label: "top_k: 3 → 5",
-  },
-  {
-    key: "sem_weight",
-    overrides: { hybrid_search: { active_semantic_weight: 0.85, active_keyword_weight: 0.15 } },
-    label: "sem weight: 0.60 → 0.85",
-  },
+  // ── Chunking method ──
+  { key: "chunking_sw",    overrides: { chunking: { active_method: "sentence_window" } },         label: "chunking: fixed_words → sentence_window" },
+  { key: "chunking_para",  overrides: { chunking: { active_method: "paragraph" } },                label: "chunking: fixed_words → paragraph" },
+  { key: "chunking_slide", overrides: { chunking: { active_method: "sliding_sentence" } },         label: "chunking: fixed_words → sliding_sentence" },
+  { key: "chunk_size_lg",  overrides: { chunking: { active_chunk_size: 220 } },                    label: "chunk size: 120 → 220" },
+  // ── Embedding model ──
+  { key: "embed_minilm",   overrides: { embeddings: { active_model: "sentence-transformers/all-MiniLM-L6-v2" } },         label: "embed: hashing → all-MiniLM-L6-v2" },
+  { key: "embed_multiqa",  overrides: { embeddings: { active_model: "sentence-transformers/multi-qa-MiniLM-L6-cos-v1" } }, label: "embed: hashing → multi-qa-MiniLM" },
+  { key: "embed_mpnet",    overrides: { embeddings: { active_model: "sentence-transformers/all-mpnet-base-v2" } },         label: "embed: hashing → all-mpnet-base-v2" },
+  { key: "embed_openai",   overrides: { embeddings: { active_model: "openai:text-embedding-3-small" } },                   label: "embed: hashing → openai text-embedding-3-small" },
+  // ── Retrieval weights (one direction at a time; both weights sum to 1) ──
+  { key: "sem_up",   overrides: { hybrid_search: { active_semantic_weight: 0.75, active_keyword_weight: 0.25 } }, label: "sem weight: 0.60 → 0.75" },
+  { key: "sem_max",  overrides: { hybrid_search: { active_semantic_weight: 0.90, active_keyword_weight: 0.10 } }, label: "sem weight: 0.60 → 0.90" },
+  { key: "kw_up",   overrides: { hybrid_search: { active_semantic_weight: 0.40, active_keyword_weight: 0.60 } }, label: "kw weight: 0.40 → 0.60" },
+  { key: "kw_max",  overrides: { hybrid_search: { active_semantic_weight: 0.30, active_keyword_weight: 0.70 } }, label: "kw weight: 0.40 → 0.70" },
+  // ── Retrieval top-k ──
+  { key: "top_k_5",  overrides: { hybrid_search: { active_top_k: 5 } },  label: "top_k: 3 → 5" },
+  { key: "top_k_7",  overrides: { hybrid_search: { active_top_k: 7 } },  label: "top_k: 3 → 7" },
+  { key: "top_k_10", overrides: { hybrid_search: { active_top_k: 10 } }, label: "top_k: 3 → 10" },
 ];
 
 function mergeOverrides(base: Record<string, any>, delta: Record<string, any>): Record<string, any> {
