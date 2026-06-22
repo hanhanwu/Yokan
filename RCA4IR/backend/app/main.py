@@ -121,6 +121,7 @@ class LogStepRequest(BaseModel):
     precisions: list[float]
     action: str  # "baseline" | "approved" | "rejected"
     overrides: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None  # baseline config snapshot
 
 
 @app.post("/log-step")

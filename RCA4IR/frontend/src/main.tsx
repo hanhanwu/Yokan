@@ -7,6 +7,7 @@ type EvalData = {
   recalls: number[];
   precisions: number[];
   ap: number;
+  config?: Record<string, any>;
 };
 
 type LogEntry = {
@@ -17,6 +18,7 @@ type LogEntry = {
   precisions: number[];
   action: "baseline" | "approved" | "rejected";
   overrides: Record<string, any>;
+  config?: Record<string, any>;
 };
 
 type ChartEntry = {
@@ -98,7 +100,7 @@ function App() {
       .then((data: EvalData) => {
         setCharts([{ id: "baseline", recalls: data.recalls, precisions: data.precisions, ap: data.ap, label: "Baseline" }]);
         setStatusMsg("");
-        addLogEntry({ step: 0, label: "Baseline", ap: data.ap, recalls: data.recalls, precisions: data.precisions, action: "baseline", overrides: {} });
+        addLogEntry({ step: 0, label: "Baseline", ap: data.ap, recalls: data.recalls, precisions: data.precisions, action: "baseline", overrides: {}, config: data.config });
       })
       .catch((err) => setStatusMsg(`Failed to load baseline: ${err.message}`));
   }, []);
@@ -228,7 +230,10 @@ function App() {
         {isDone && logEntries.length > 0 && (
           <div className="learningSection">
             <h2 className="learningTitle">Learning Graph</h2>
-            <LearningGraph entries={logEntries} />
+            <div className="learningGraphs">
+              <LearningGraph entries={logEntries} />
+              <DecisionTree entries={logEntries} />
+            </div>
             <div className="learningLegend">
               {logEntries.map((e) => (
                 <div key={`${e.step}-${e.action}`} className="legendItem">
@@ -267,7 +272,7 @@ function PRCurve({ recalls, precisions, ap }: { recalls: number[]; precisions: n
 
   return (
     <svg width={W} height={H} className="prSvg">
-      <text x={W / 2} y={17} textAnchor="middle" fontWeight="700" fontSize="12" fill="#e07a39">
+      <text x={W / 2} y={17} textAnchor="middle" fontWeight="700" fontSize="12" fill="#FF7A00">
         AP = {ap.toFixed(4)}
       </text>
       {ticks.map((t) => (
@@ -276,13 +281,13 @@ function PRCurve({ recalls, precisions, ap }: { recalls: number[]; precisions: n
       {ticks.map((t) => (
         <line key={`gy-${t}`} x1={PAD_L} y1={toY(t)} x2={toX(1)} y2={toY(t)} stroke="#e5e1d8" strokeWidth="1" />
       ))}
-      <polygon points={areaPoints} fill="#e07a39" fillOpacity="0.12" />
-      <polyline points={linePoints} fill="none" stroke="#e07a39" strokeWidth="2" strokeLinejoin="round" />
+      <polygon points={areaPoints} fill="#FF7A00" fillOpacity="0.12" />
+      <polyline points={linePoints} fill="none" stroke="#FF7A00" strokeWidth="2" strokeLinejoin="round" />
       {recalls.map((r, i) => (
         <g key={i}>
-          <circle cx={toX(r)} cy={toY(precisions[i])} r={4} fill="#e07a39" />
+          <circle cx={toX(r)} cy={toY(precisions[i])} r={4} fill="#FF7A00" />
           {i > 0 && (
-            <text x={toX(r) + 5} y={toY(precisions[i]) - 3} fontSize="9" fill="#c05a1a">k={i}</text>
+            <text x={toX(r) + 5} y={toY(precisions[i]) - 3} fontSize="9" fill="#cc6200">k={i}</text>
           )}
         </g>
       ))}
@@ -303,6 +308,145 @@ function PRCurve({ recalls, precisions, ap }: { recalls: number[]; precisions: n
       <text x={W / 2} y={H - 2} textAnchor="middle" fontSize="10" fill="#4a555c">Recall</text>
       <text x={10} y={PAD_T + plotH / 2} textAnchor="middle" fontSize="10" fill="#4a555c"
         transform={`rotate(-90, 10, ${PAD_T + plotH / 2})`}>Precision</text>
+    </svg>
+  );
+}
+
+// ── Decision Tree ─────────────────────────────────────────────────────────────
+
+function DecisionTree({ entries }: { entries: LogEntry[] }) {
+  if (entries.length === 0) return null;
+  const baseline = entries[0];
+
+  const NODE_W = 172, NODE_H = 52;
+  const APPROVE_DX = 115, REJECT_DX = -115;
+  const CONNECTOR_GAP = 30; // gap between parent bottom edge and child top edge
+
+  // Split "foo: bar → baz" into ["foo: bar", "→ baz"]
+  function splitLabel(label: string): [string, string | null] {
+    const idx = label.indexOf(" → ");
+    if (idx !== -1) return [label.slice(0, idx), "→ " + label.slice(idx + 3)];
+    return [label, null];
+  }
+
+  // Config summary lines (shown inside baseline node)
+  const cfg = baseline.config || {};
+  const cfgLines: string[] = cfg.chunking
+    ? [
+        `chunk: ${cfg.chunking.active_method} (size ${cfg.chunking.active_chunk_size})`,
+        `embed: ${cfg.embeddings?.active_model}`,
+        `sem=${cfg.hybrid_search?.active_semantic_weight}  kw=${cfg.hybrid_search?.active_keyword_weight}  k=${cfg.hybrid_search?.active_top_k}`,
+      ]
+    : [];
+  const BASELINE_H = NODE_H + (cfgLines.length > 0 ? 10 + cfgLines.length * 14 : 0);
+
+  // Build active chain (baseline + all approved), sorted by step
+  const activeChain = entries
+    .filter((e) => e.action === "baseline" || e.action === "approved")
+    .sort((a, b) => a.step - b.step);
+
+  type NodePos = { entry: LogEntry; x: number; y: number; parentStep: number | null; nodeH: number };
+  const posMap = new Map<number, NodePos>();
+  posMap.set(baseline.step, { entry: baseline, x: 270, y: 20, parentStep: null, nodeH: BASELINE_H });
+
+  for (const e of entries.filter((e) => e.action !== "baseline").sort((a, b) => a.step - b.step)) {
+    const approvedBefore = activeChain.filter((a) => a.step < e.step);
+    const parentEntry = approvedBefore[approvedBefore.length - 1] ?? baseline;
+    const parentPos = posMap.get(parentEntry.step)!;
+    posMap.set(e.step, {
+      entry: e,
+      x: parentPos.x + (e.action === "approved" ? APPROVE_DX : REJECT_DX),
+      y: parentPos.y + parentPos.nodeH + CONNECTOR_GAP,
+      parentStep: parentEntry.step,
+      nodeH: NODE_H,
+    });
+  }
+
+  const nodes = Array.from(posMap.values());
+  const maxY = Math.max(...nodes.map((n) => n.y + n.nodeH));
+  const minX = Math.min(...nodes.map((n) => n.x - NODE_W / 2));
+  const maxX = Math.max(...nodes.map((n) => n.x + NODE_W / 2));
+  const shiftX = minX < 16 ? 16 - minX : 0;
+  const W = Math.max(400, maxX + shiftX + 20);
+  const H = maxY + 16;
+
+  return (
+    <svg width={W} height={H} className="treeSvg">
+      {/* Connectors */}
+      {nodes
+        .filter((n) => n.parentStep !== null)
+        .map((n) => {
+          const parent = posMap.get(n.parentStep!)!;
+          const isApprove = n.entry.action === "approved";
+          const color = isApprove ? "#228B22" : "#9ba8ad";
+          const x1 = parent.x + shiftX, y1 = parent.y + parent.nodeH;
+          const x2 = n.x + shiftX,     y2 = n.y;
+          const mx = (x1 + x2) / 2,   my = (y1 + y2) / 2;
+          return (
+            <g key={`conn-${n.entry.step}`}>
+              <line x1={x1} y1={y1} x2={x2} y2={y2}
+                stroke={color} strokeWidth="1.5"
+                strokeDasharray={isApprove ? undefined : "4,3"} />
+              <text x={mx} y={my - 4} textAnchor="middle" fontSize="9" fontWeight="600" fill={color}>
+                {isApprove ? "Approve →" : "← Reject"}
+              </text>
+            </g>
+          );
+        })}
+
+      {/* Nodes */}
+      {nodes.map((n) => {
+        const isBase    = n.entry.action === "baseline";
+        const isApprove = n.entry.action === "approved";
+        const fill     = isBase ? "#172026" : isApprove ? "#228B22" : "#f0ece4";
+        const textFill = isBase ? "#ffffff" : isApprove ? "#ffffff" : "#172026";
+        const apFill   = isBase ? "rgba(255,255,255,0.88)" : isApprove ? "rgba(255,255,255,0.85)" : "#4a555c";
+        const cx = n.x + shiftX;
+        const [line1, line2] = splitLabel(n.entry.label);
+        // two-line label for improvement nodes (baseline never has " → ")
+        const twoLines = !isBase && line2 !== null;
+        const label1Y = twoLines ? n.y + 15 : n.y + 20;
+        const label2Y = n.y + 29;
+        const apY     = twoLines ? n.y + 43 : n.y + 35;
+
+        return (
+          <g key={`node-${n.entry.step}`}>
+            <rect x={cx - NODE_W / 2} y={n.y} width={NODE_W} height={n.nodeH} rx="6" fill={fill} />
+
+            {/* Label */}
+            <text x={cx} y={label1Y} textAnchor="middle" fontSize="10" fontWeight="700" fill={textFill}>
+              {isBase ? n.entry.label : line1}
+            </text>
+            {twoLines && (
+              <text x={cx} y={label2Y} textAnchor="middle" fontSize="10" fontWeight="700" fill={textFill}>
+                {line2}
+              </text>
+            )}
+
+            {/* AP value */}
+            <text x={cx} y={apY} textAnchor="middle" fontSize="9" fill={apFill}>
+              AP = {n.entry.ap.toFixed(4)}
+            </text>
+
+            {/* Baseline config section */}
+            {isBase && cfgLines.length > 0 && (
+              <>
+                <line
+                  x1={cx - NODE_W / 2 + 10} y1={n.y + NODE_H}
+                  x2={cx + NODE_W / 2 - 10} y2={n.y + NODE_H}
+                  stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
+                {cfgLines.map((line, i) => (
+                  <text key={i} x={cx} y={n.y + NODE_H + 13 + i * 14}
+                    textAnchor="middle" fontSize="8.5" fill="rgba(255,255,255,0.85)">
+                    {line}
+                  </text>
+                ))}
+              </>
+            )}
+          </g>
+        );
+      })}
+
     </svg>
   );
 }
@@ -335,7 +479,7 @@ function LearningGraph({ entries }: { entries: LogEntry[] }) {
         </g>
       ))}
       {approvedEntries.length > 1 && (
-        <polyline points={approvedLine} fill="none" stroke="#e07a39" strokeWidth="2.5" strokeLinejoin="round" />
+        <polyline points={approvedLine} fill="none" stroke="#FF7A00" strokeWidth="2.5" strokeLinejoin="round" />
       )}
       {entries.map((e) => {
         const cx = toX(e.step), cy = toY(e.ap), d = 6;
@@ -350,8 +494,8 @@ function LearningGraph({ entries }: { entries: LogEntry[] }) {
         }
         return (
           <g key={`${e.step}-a`}>
-            <circle cx={cx} cy={cy} r={6} fill="#e07a39" />
-            <text x={cx} y={cy - 10} textAnchor="middle" fontSize="9" fontWeight="700" fill="#e07a39">{e.ap.toFixed(3)}</text>
+            <circle cx={cx} cy={cy} r={6} fill="#FF7A00" />
+            <text x={cx} y={cy - 10} textAnchor="middle" fontSize="9" fontWeight="700" fill="#FF7A00">{e.ap.toFixed(3)}</text>
           </g>
         );
       })}
