@@ -1,8 +1,10 @@
-# Yokan
+# Yokan - My Experiment Space
 
-## Compare Chunking Strategies
-* Update which chunking strategies to try, in `chunker_config.yaml`, `generate_chunks.py`
-* `source ../.venv13/bin/activate`
-* `python experiments_goldenset/generate_chunks.py`
-* `cd frontend` --> `npx expo start --web` for chunking observation UI
-* `cd frontend2` --> `npx expo start --web` for topic matching observation UI
+## About
+Before any implementation goes to [RAGDoctor][1], [GroundLens][2] or more, I do experiments here.
+
+
+
+
+[1]:https://github.com/hanhanwu/RagDoctor
+[2]:https://github.com/hanhanwu/GroundLens
