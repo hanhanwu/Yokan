@@ -87,6 +87,7 @@ RCA4IR/frontend/node_modules
 
 experiments_multimodal/PixelRAG/data/*
 experiments_multimodal/PixelRAG/extracted_images/*
+experiments_multimodal/PixelRAG/extracted_images_mineru/*
 
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
