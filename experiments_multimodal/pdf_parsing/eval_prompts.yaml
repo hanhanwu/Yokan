@@ -1,66 +1,5 @@
 # ------------------------------------------ RETRIEVAL RELEVANCY ------------------------------------------ #
 rr_prompt_template: |
-    You are an expert reviewing the RETRIEVED CONTENT.
-    Your task is to generate a retrieval relevancy score based on the requirements below:
-
-    ### INSTRUCTIONS ###
-            - Read and understand the full meaning of the USER QUERY
-            - Read the REFERENCE CONTENT and summarise its key information relevant to the USER QUERY
-            - Compare the RETRIEVED CONTENT with the USER QUERY and the REFERENCE CONTENT, and evaluate based on the RUBRICS below:
-                - Only generate the score as -1, 0 or 1 or 2 or 3
-                - Scoring as -1: if the RETRIEVED CONTENT is much more relevant to the USER QUERY than the REFERENCE CONTENT
-                - Scoring as 0: if the RETRIEVED CONTENT is completely irrelevant to the USER QUERY
-                - If the REFERENCE CONTENT is strongly relevant to the USER QUERY:
-                    - Scoring as 1: if the RETRIEVED CONTENT is relevant to the USER QUERY but doesn't contain any critical information from the REFERENCE CONTENT
-                    - Scoring as 2: if the RETRIEVED CONTENT is relevant to the USER QUERY but only partially contains critical information from the REFERENCE CONTENT
-                    - Scoring as 3: if the RETRIEVED CONTENT is relevant to the USER QUERY and contains all the critical information from the REFERENCE CONTENT
-            - Provide detailed scoring reasons
-
-    ### EXAMPLE OUTPUT FORMAT ###
-            {{
-                "score": -1,
-                "reasoning": "The RETRIEVED CONTENT is much more relevant to the USER QUERY than the REFERENCE CONTENT"
-            }}
-            {{
-                "score": -1,
-                "reasoning": "The REFERENCE CONTENT seems irrelevant to the USER QUERY compared to the RETRIEVED CONTENT"
-            }}
-            {{
-                "score": 1,
-                "reasoning": "The RETRIEVED CONTENT is relevant to the USER QUERY but doesn't contain any critical information from the REFERENCE CONTENT"
-            }}
-            {{
-                "score": 2,
-                "reasoning": "The RETRIEVED CONTENT is relevant to the USER QUERY but only partially contains critical information from the REFERENCE CONTENT"
-            }}
-            {{
-                "score": 3,
-                "reasoning": "The RETRIEVED CONTENT is relevant to the USER QUERY and contains all the critical information from the REFERENCE CONTENT"
-            }}
-            {{
-                "score": 0,
-                "reasoning": "The RETRIEVED CONTENT is completely irrelevant to the USER QUERY"
-            }}
-
-    ### OUTPUT REQUIREMENTS ###
-    - Make sure your output reasoning is brief but comprehensive, covering all key points that justify your score
-    - Try to make output reasoning with no more than 200 tokens if you can
-
-    Here is the USER QUERY:
-    {user_query}
-
-    Here is the REFERENCE CONTENT:
-    {reference_content}
-
-    Here is the RETRIEVED CONTENT:
-    {retrieved_content}
-
-    Your evaluation should follow this format:
-    {format_instructions}
-# ------------------------------------------ RETRIEVAL RELEVANCY ------------------------------------------ #
-
-# ------------------------------------------ QUERY RELEVANCY ------------------------------------------ #
-qr_prompt_template: |
     You are an expert evaluating whether a retrieved text chunk is relevant to a user query.
     Your task is to generate a query relevancy score based on the requirements below:
 
@@ -105,4 +44,4 @@ qr_prompt_template: |
 
     Your evaluation should follow this format:
     {format_instructions}
-# ------------------------------------------ QUERY RELEVANCY ------------------------------------------ #
+# ------------------------------------------ RETRIEVAL RELEVANCY ------------------------------------------ #
