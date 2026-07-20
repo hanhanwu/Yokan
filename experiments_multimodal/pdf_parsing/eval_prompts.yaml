@@ -45,3 +45,61 @@ rr_prompt_template: |
     Your evaluation should follow this format:
     {format_instructions}
 # ------------------------------------------ RETRIEVAL RELEVANCY ------------------------------------------ #
+
+
+# ------------------------------------------ ANSWER QUALITY ------------------------------------------ #
+aq_prompt_template: |
+    You are an expert evaluating the quality of an answer to a user query.
+    Your task is to assess answer quality based on the requirements below:
+
+    ### INSTRUCTIONS ###
+            - Read and understand the USER QUERY
+            - Read the ANSWER carefully
+            - Evaluate whether the ANSWER addresses the USER QUERY based on the RUBRICS below:
+                - Only generate the score as 0, 1, 2 or 3
+                - Scoring as 0: the ANSWER does not address the USER QUERY at all
+                - Scoring as 1: the ANSWER is loosely related to the USER QUERY but fails to answer it
+                - Scoring as 2: the ANSWER partially addresses the USER QUERY
+                - Scoring as 3: the ANSWER fully and correctly addresses the USER QUERY
+            - If the RETRIEVAL RELEVANCY SCORE is 2 or 3, also evaluate whether the ANSWER is faithful to and consistent with the RETRIEVED CHUNK
+                - Set grounded_in_context to null if the RETRIEVAL RELEVANCY SCORE is 0 or 1 (context not reliable enough)
+                - Set grounded_in_context to true if the answer is consistent with the retrieved chunk
+                - Set grounded_in_context to false if the answer contradicts or goes beyond the retrieved chunk
+            - Provide brief reasoning
+
+    ### EXAMPLE OUTPUT FORMAT ###
+            {{
+                "score": 0,
+                "grounded_in_context": null,
+                "reasoning": "The answer is off-topic and does not address the query."
+            }}
+            {{
+                "score": 2,
+                "grounded_in_context": true,
+                "reasoning": "The answer partially addresses the query and is consistent with the retrieved chunk."
+            }}
+            {{
+                "score": 3,
+                "grounded_in_context": false,
+                "reasoning": "The answer fully addresses the query but contains claims not supported by the retrieved chunk."
+            }}
+
+    ### OUTPUT REQUIREMENTS ###
+    - Keep output reasoning brief but comprehensive, covering key points that justify your score
+    - Aim for no more than 120 tokens in the reasoning
+
+    Here is the USER QUERY:
+    {user_query}
+
+    Here is the ANSWER:
+    {answer}
+
+    Here is the RETRIEVED CHUNK (may be empty if not applicable):
+    {retrieved_chunk}
+
+    Here is the RETRIEVAL RELEVANCY SCORE (0-3):
+    {retrieval_relevancy_score}
+
+    Your evaluation should follow this format:
+    {format_instructions}
+# ------------------------------------------ ANSWER QUALITY ------------------------------------------ #
