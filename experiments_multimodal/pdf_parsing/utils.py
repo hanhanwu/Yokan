@@ -91,7 +91,8 @@ async def get_retrieval_relevancy_output_async(input_df, llm, chunk_col='retriev
 # ------------------------------------------ ANSWER QUALITY ------------------------------------------ #
 class AnswerQuality(BaseModel):
     score: int = Field(description="""Score with:
-                - Only generate the score as 0, 1, 2 or 3
+                - Only generate the score as -1, 0, 1, 2 or 3
+                - Scoring as -1: the ANSWER is hallucination
                 - Scoring as 0: the ANSWER does not address the USER QUERY at all
                 - Scoring as 1: loosely related but fails to answer the query
                 - Scoring as 2: partially addresses the USER QUERY
