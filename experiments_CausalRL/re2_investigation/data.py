@@ -14,6 +14,7 @@ from .download import DATA, DATASET
 SERVICES = ("checkoutservice", "currencyservice", "emailservice", "productcatalogservice",
             "recommendationservice")
 SOURCES = ("Metrics", "Logs", "Traces")
+METRICS_ONLY = ("Metrics",)
 WINDOW = 120
 METRICS = ("cpu", "mem", "diskio", "socket", "workload", "latency-90", "error")
 METRIC_LABELS = ("CPU", "Memory (MiB)", "Disk I/O", "Open sockets", "Requests",
@@ -82,6 +83,26 @@ def service_calls(healthy):
     return Counter(zip(cross.caller, cross.service))
 
 
+def visible_service_edges(calls):
+    visible = {"frontend", *SERVICES}
+    edges = sorted((a, b) for (a, b), count in calls.items()
+                   if count >= 10 and a in visible and b in visible)
+    if not edges:
+        raise ValueError("The training traces yielded no service dependencies.")
+    return edges
+
+
+def load_training_topology(trace_cases):
+    calls = Counter()
+    for folder, onset in trace_cases:
+        traces = pd.read_parquet(folder / "traces.parquet", columns=[
+            "startTimeMillis", "serviceName", "traceID", "spanID", "parentSpanID"
+        ])
+        healthy, _ = windows(traces, traces.startTimeMillis / 1000, onset)
+        calls.update(service_calls(healthy))
+    return visible_service_edges(calls)
+
+
 def trace_stats(frame):
     if frame.empty:
         return [0, 0, 0]
@@ -94,13 +115,24 @@ def log_stats(frame):
     return [len(frame), int(flags.sum())]
 
 
-def prepare_case(folder, id, repetition, onset):
-    metrics = pd.read_parquet(folder / "metrics.parquet")
+def metric_observations(metrics, onset):
     columns = [f"{service}_{metric}" for service in ("frontend", *SERVICES) for metric in METRICS]
     shifts = pd.DataFrame(window_changes(metrics, onset, columns, WINDOW), index=columns)
     metric_windows = windows(metrics, metrics.time, onset)
     medians = [w.drop(columns="time").replace([np.inf, -np.inf], np.nan).median() for w in metric_windows]
     frontend = metric_evidence(shifts, *medians, "frontend")
+    queries = [metric_evidence(shifts, *medians, service) for service in SERVICES]
+    return frontend, queries, metric_windows
+
+
+def prepare_metric_case(folder, id, repetition, onset):
+    frontend, queries, _ = metric_observations(pd.read_parquet(folder / "metrics.parquet"), onset)
+    return Case(id, repetition, frontend, queries)
+
+
+def prepare_case(folder, id, repetition, onset):
+    metrics = pd.read_parquet(folder / "metrics.parquet")
+    frontend, service_metrics, metric_windows = metric_observations(metrics, onset)
 
     logs = pd.read_parquet(folder / "logs.parquet", columns=["timestamp", "container_name", "message"])
     logs_before, logs_after = windows(logs, logs.timestamp, onset)
@@ -109,8 +141,8 @@ def prepare_case(folder, id, repetition, onset):
     ])
     traces_before, traces_after = windows(traces, traces.startTimeMillis / 1000, onset)
     queries = []
-    for service in SERVICES:
-        queries.append(metric_evidence(shifts, *medians, service))
+    for service, metric in zip(SERVICES, service_metrics):
+        queries.append(metric)
         a, b = (part.loc[part.container_name.eq(service)] for part in (logs_before, logs_after))
         queries.append(aggregate_evidence(("Log entries", "Entries with error words"),
                                           log_stats(a), log_stats(b), bool(len(a) + len(b))))
@@ -128,12 +160,28 @@ def prepare_case(folder, id, repetition, onset):
     return Case(id, repetition, frontend, queries), edges, ranks
 
 
-def load_cases():
+def re2_index():
     index = case_index(DATA, DATASET).sample(frac=1, random_state=471)
+    return [(f"OB-{number:03}", row) for number, row in enumerate(index.itertuples(index=False), start=1)]
+
+
+def load_metric_evaluation():
+    groups, answers = {2: [], 3: []}, {}
+    for case_id, row in re2_index():
+        if row.repetition in groups:
+            case = prepare_metric_case(DATA / row.case, case_id, int(row.repetition), row.inject_time)
+            groups[row.repetition].append(case)
+            answers[case_id] = {"service": row.root_cause_service, "fault": row.fault}
+    if tuple(map(len, groups.values())) != (30, 30):
+        raise ValueError("Expected 30 RE2 validation and 30 RE2 test cases.")
+    return (groups[2], groups[3]), answers
+
+
+def load_cases():
+    index = re2_index()
     cases, answers, baseline = [], {}, {}
     totals = Counter()
-    for number, row in enumerate(index.itertuples(index=False), start=1):
-        case_id = f"OB-{number:03}"
+    for number, (case_id, row) in enumerate(index, start=1):
         case, edges, ranks = prepare_case(DATA / row.case, case_id, int(row.repetition), row.inject_time)
         cases.append(case)
         totals.update(edges)
@@ -143,13 +191,7 @@ def load_cases():
         if number % 15 == 0:
             print(f"Summarized {number}/{len(index)} incidents", flush=True)
 
-    # Owner services are the nodes learned from training traces. Keep frequent
-    # direct calls between the investigated services and the frontend in the report.
-    visible = {"frontend", *SERVICES}
-    edges = sorted((a, b) for (a, b), count in totals.items()
-                   if count >= 10 and a in visible and b in visible)
-    if not edges:
-        raise ValueError("The training traces yielded no service dependencies.")
+    edges = visible_service_edges(totals)
     groups = [[case for case in cases if case.repetition == rep] for rep in (1, 2, 3)]
     if tuple(map(len, groups)) != (30, 30, 30):
         raise ValueError("Expected 30 train, 30 validation, and 30 test cases.")

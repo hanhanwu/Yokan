@@ -9,7 +9,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 import torch
 
 from common import train
-from .agent import BUDGETS, Investigation, investigate, learned_policy, simple_policy
+from .agent import Investigation, investigate, learned_policy, simple_policy
 from .data import load_cases, SERVICES
 from .report import write_report
 
@@ -21,9 +21,9 @@ DEMO_BUDGET = 4
 
 
 class ValidationCurve(BaseCallback):
-    def __init__(self, cases, edges, answers, interval):
+    def __init__(self, cases, edges, answers, interval, *, causal=None, metrics_only=False):
         super().__init__()
-        self.env = Investigation(cases, edges)
+        self.env = Investigation(cases, edges, causal=causal, metrics_only=metrics_only)
         self.answers = answers
         self.interval = interval
         self.points = []
@@ -54,19 +54,22 @@ def grade(answer, ranks, inspected):
                 inspected_root=root in inspected, submitted=bool(ranks))
 
 
-def benchmark(cases, answers, baseline, policies):
+def benchmark(cases, answers, baseline, policies, *, causal_by_method=None, metrics_only=False):
     rows, walkthroughs = [], {}
     first_seed = next(seed for method, seed, _, _ in policies if method == PLAIN)
-    agents = [(method, seed, Investigation(cases, edges), choose)
+    causal_by_method = causal_by_method or {}
+    agents = [(method, seed, Investigation(cases, edges, causal=causal_by_method.get(method),
+                                           metrics_only=metrics_only), choose)
               for method, seed, edges, choose in policies]
     for i, case in enumerate(cases):
         answer = answers[case.id]
-        ranks = baseline[case.id]
-        rows.append(dict(incident=case.id, fault=answer["fault"], method=BARO, seed=-1,
-                         budget=None, queries=None, **grade(answer, ranks, SERVICES)))
+        if baseline is not None:
+            ranks = baseline[case.id]
+            rows.append(dict(incident=case.id, fault=answer["fault"], method=BARO, seed=-1,
+                             budget=None, queries=None, **grade(answer, ranks, SERVICES)))
         traces = {}
         for method, seed, env, choose in agents:
-            for budget in BUDGETS:
+            for budget in env.budgets:
                 capture = budget == DEMO_BUDGET and seed in (-1, first_seed)
                 result = investigate(env, choose, i, budget, capture)
                 rows.append(dict(incident=case.id, fault=answer["fault"], method=method, seed=seed,

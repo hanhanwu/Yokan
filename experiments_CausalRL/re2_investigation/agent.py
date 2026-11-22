@@ -7,14 +7,13 @@ from gymnasium import spaces
 import numpy as np
 import torch
 
-from .data import SERVICES, SOURCES, WIDTH
+from .data import METRICS_ONLY, SERVICES, SOURCES, WIDTH
 
 
 BUDGETS = (2, 4, 6)
+METRIC_BUDGETS = (2, 4, len(SERVICES))
 QUERY_COST = 0.05
 N = len(SERVICES)
-M = len(SOURCES)
-QUERIES = N * M
 
 
 @dataclass(frozen=True)
@@ -37,26 +36,30 @@ def graph_features(edges):
 
 
 class Investigation(gym.Env):
-    def __init__(self, cases, edges=(), training_roots=None):
+    def __init__(self, cases, edges=(), training_roots=None, *, causal=None, metrics_only=False):
         super().__init__()
         self.cases = cases
         self.training_roots = training_roots
+        self.causal = causal
+        self.sources = METRICS_ONLY if metrics_only else SOURCES
+        self.budgets = METRIC_BUDGETS if metrics_only else BUDGETS
+        self.query_count = N * len(self.sources)
         self.neighbors, self.frontend = graph_features(edges)
-        self.action_space = spaces.Discrete(QUERIES + N)
+        self.action_space = spaces.Discrete(self.query_count + N)
         self.observation_space = spaces.Box(
-            -1, 1, (WIDTH + QUERIES * (WIDTH + 1) + 2 * N + 1,), dtype=np.float32
+            -1, 1, (WIDTH + self.query_count * (WIDTH + 1) + 2 * N + 1,), dtype=np.float32
         )
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         if options is None:
             index = self.np_random.integers(len(self.cases))
-            self.remaining = int(self.np_random.choice(BUDGETS))
+            self.remaining = int(self.np_random.choice(self.budgets))
         else:
             index, self.remaining = options["index"], options["budget"]
         self.case = self.cases[index]
-        self.revealed = np.zeros((QUERIES, WIDTH), dtype=np.float32)
-        self.queried = np.zeros(QUERIES, dtype=bool)
+        self.revealed = np.zeros((self.query_count, WIDTH), dtype=np.float32)
+        self.queried = np.zeros(self.query_count, dtype=bool)
         return self.state(), {}
 
     def signal(self, revealed):
@@ -67,14 +70,18 @@ class Investigation(gym.Env):
         linked_evidence = (self.neighbors * signals).max(axis=1)
         return self.frontend, linked_evidence
 
-    def state(self, revealed=None):
+    def state(self, revealed=None, *, mask_causal=False):
         revealed = self.revealed if revealed is None else revealed
+        context = (self.graph_context(revealed) if self.causal is None
+                   else self.causal.scores(self.case.frontend.values, revealed[::len(self.sources)]).T)
+        if mask_causal:
+            context = np.zeros_like(context)
         return np.concatenate((self.case.frontend.values, revealed.flatten(), self.queried,
-                               *self.graph_context(revealed), [self.remaining / max(BUDGETS)])).astype(np.float32)
+                               *context, [self.remaining / max(self.budgets)])).astype(np.float32)
 
     def step(self, action):
-        if action >= QUERIES:
-            guess = SERVICES[action - QUERIES]
+        if action >= self.query_count:
+            guess = SERVICES[action - self.query_count]
             reward = 0.0
             if self.training_roots is not None:
                 reward = 1.0 if self.training_roots[self.case.id] == guess else -1.0
@@ -89,19 +96,19 @@ class Investigation(gym.Env):
 
 
 def simple_policy(env, observation):
-    revealed = observation[WIDTH:WIDTH + QUERIES * WIDTH].reshape(QUERIES, WIDTH)
+    revealed = observation[WIDTH:WIDTH + env.query_count * WIDTH].reshape(env.query_count, WIDTH)
     direct = env.signal(revealed)
     frontend, linked = env.graph_context(revealed)
     scores = direct + 0.10 * linked + 0.04 * frontend
     ranks = np.argsort(-scores, kind="stable")
     if not env.remaining or env.queried.all():
-        return Choice(QUERIES + int(ranks[0]), scores)
-    by_service = env.queried.reshape(N, M)
+        return Choice(env.query_count + int(ranks[0]), scores)
+    by_service = env.queried.reshape(N, len(env.sources))
     eligible = [i for i in ranks if not by_service[i].all()]
     # Balance evidence strength against how many queries a service already received.
     service = min(eligible, key=lambda i: by_service[i].sum() - scores[i])
     source = np.flatnonzero(~by_service[service])[0]
-    return Choice(int(service * M + source), scores)
+    return Choice(int(service * len(env.sources) + source), scores)
 
 
 def learned_policy(model):
@@ -109,36 +116,36 @@ def learned_policy(model):
         with torch.no_grad():
             tensor, _ = model.policy.obs_to_tensor(observation)
             values = model.q_net(tensor)[0].cpu().numpy()
-        return Choice(int(np.argmax(values)), values[QUERIES:], values)
+        return Choice(int(np.argmax(values)), values[env.query_count:], values)
     return choose
 
 
-def action_name(action):
-    if action >= QUERIES:
-        return f"Submit {SERVICES[action - QUERIES]}"
-    service, source = divmod(action, M)
-    return f"Inspect {SERVICES[service]} {SOURCES[source].lower()}"
+def action_name(env, action):
+    if action >= env.query_count:
+        return f"Submit {SERVICES[action - env.query_count]}"
+    service, source = divmod(action, len(env.sources))
+    return f"Inspect {SERVICES[service]} {env.sources[source].lower()}"
 
 
-def describe_choice(choice):
+def describe_choice(env, choice):
     action = choice.action
-    if action >= QUERIES:
-        question = f"Should I name {SERVICES[action - QUERIES]} as the root cause?"
+    if action >= env.query_count:
+        question = f"Should I name {SERVICES[action - env.query_count]} as the root cause?"
     else:
-        service, source = divmod(action, M)
+        service, source = divmod(action, len(env.sources))
         name = SERVICES[service]
         questions = {
             "Metrics": f"How did {name}’s metrics change after the fault?",
             "Logs": f"How did {name}’s log volume and error-word counts change?",
             "Traces": f"Did {name}’s operations get slower or return more errors?",
         }
-        question = questions[SOURCES[source]]
-    details = {"action": action_name(action), "question": question}
+        question = questions[env.sources[source]]
+    details = {"action": action_name(env, action), "question": question}
     if choice.action_scores is not None:
         alternative = next(i for i in np.argsort(-choice.action_scores, kind="stable") if i != action)
-        details.update(score=float(choice.action_scores[action]), alternative=action_name(alternative),
+        details.update(score=float(choice.action_scores[action]), alternative=action_name(env, alternative),
                        alternative_score=float(choice.action_scores[alternative]))
-    elif action >= QUERIES:
+    elif action >= env.query_count:
         details["rule_basis"] = "The rule names its top-ranked service after using its queries."
     else:
         details["rule_basis"] = "The rule balances observed anomalies against how often it has queried each service."
@@ -172,7 +179,7 @@ def investigate(env, choose, index, budget, trace=False):
     for _ in range(budget + 1):
         before = SERVICES[ranks[0]]
         action = choice.action
-        decision = describe_choice(choice) if trace else None
+        decision = describe_choice(env, choice) if trace else None
         observation, _, done, _, info = env.step(action)
         if done:
             if trace:
@@ -183,19 +190,28 @@ def investigate(env, choose, index, budget, trace=False):
             return {
                 "guess": info["guess"], "ranks": [SERVICES[i] for i in ranks] if info["guess"] else [],
                 "queries": int(env.queried.sum()),
-                "inspected": [name for name, seen in zip(SERVICES, env.queried.reshape(N, M).any(axis=1)) if seen],
+                "inspected": [name for name, seen in zip(SERVICES, env.queried.reshape(N, -1).any(axis=1)) if seen],
                 "initial": initial, "steps": steps,
             }
-        service, source = divmod(action, M)
+        service, source = divmod(action, len(env.sources))
         evidence = env.case.queries[action]
         choice = choose(env, observation)
         scores = choice.diagnosis_scores
         ranks = np.argsort(-scores, kind="stable")
         if trace:
-            steps.append({
-                "action": f"Inspect {SOURCES[source].lower()}",
+            step = {
+                "action": f"Inspect {env.sources[source].lower()}",
                 "service": SERVICES[service], "before": before, "after": SERVICES[ranks[0]],
                 "rows": evidence.rows, "decision": decision,
                 "support": supporting_measurement(env, choose, action, evidence, scores, ranks[0]),
-            })
+            }
+            if env.causal is not None:
+                stride = len(env.sources)
+                step["causal"] = env.causal.describe(env.case.frontend.values, env.revealed[::stride])
+                if step["causal"]:
+                    masked = choose(env, env.state(mask_causal=True))
+                    alternative = SERVICES[int(np.argmax(masked.diagnosis_scores))]
+                    if alternative != step["after"] or masked.action != choice.action:
+                        step["causal_masked"] = {"suspect": alternative, "action": action_name(env, masked.action)}
+            steps.append(step)
     raise RuntimeError("Investigation exceeded its query budget.")

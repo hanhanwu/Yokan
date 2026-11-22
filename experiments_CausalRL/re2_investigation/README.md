@@ -48,3 +48,47 @@ At the four-query cap, the graph helped the evidence rule on two of the 30 incid
 The graph represents observed service calls. The walkthrough shows changes in available evidence and model predictions during replay. Controlled interventions are demonstrated separately in the [RE1 teaching lab](../re1_demo/README.md).
 
 [Per-incident results](runs/test_episodes.csv) · [Budget summary](runs/test_summary.csv) · [Validation checkpoints](runs/validation_learning.csv) · [RCAEval](https://github.com/phamquiluan/RCAEval)
+
+## Report 2 · causal-learn DQN
+
+[Open Report 2](runs/causal/report2.html) to compare the original Plain DQN checkpoints with DQN plus observational root-cause context. Both policies use the same 30 RE2 training replays, 30 validation cases, 30 holdout cases, starting frontend measurements, query costs, action space, DQN architecture, and 16,000 training steps per seed. RE1 contributes metrics to discovery. The RE2 replay supplies metrics, logs, and traces to both policies.
+
+Causal-learn runs PC with Fisher Z at α = 0.05 on **90 incident summaries**. The fit uses 23 complete RE2 training incidents and 67 complete RE1 incidents whose injected roots are among the five candidates. Each summary uses the stronger absolute normalized change in CPU or memory for each service. Median frontend errors stayed at zero before and after all 90 faults, so discovery excludes that constant signal. PC found three directed links into Checkout. Standardized regressions estimate the relationships jointly, and the chart displays the absolute strengths. [PC algorithm documentation](https://causal-learn.readthedocs.io/en/latest/search_methods_index/Constraint-based%20causal%20discovery%20methods/PC.html)
+
+The causal features start at zero. After a source metrics query, the signed relationship predicts how that source contributes to a destination's resource shift. After the destination's metrics are revealed, the agent can also see how much including the source improves or worsens the fit. The walkthrough shows these values and flags changes to the suspect or next decision when the causal features are zeroed.
+
+| Query cap | Plain DQN top-1 | Causal-learn DQN top-1 | Mean queries, plain / causal-learn |
+| ---: | ---: | ---: | ---: |
+| 2 | 67.8% | 56.7% | 1.23 / 1.30 |
+| 4 | 67.8% | 64.4% | 2.79 / 2.84 |
+| 6 | 76.7% | 70.0% | 4.56 / 4.84 |
+
+Across three seeds on the same 30 holdout cases, the causal policy submitted 10 fewer correct diagnoses at cap 2, three fewer at cap 4, and six fewer at cap 6. The shared signals and the resulting graph differ from the earlier 30-incident fit, so this run alone cannot isolate the effect of sample size. Testing a suspected cause requires an intervention with a measured outcome.
+
+After installing the updated requirements, run this from `experiments_CausalRL`.
+
+```sh
+.venv/bin/python -m re1_demo.download
+.venv/bin/python -m re2_investigation.download
+.venv/bin/python -m re2_investigation.run_causal
+```
+
+The runner replays the archived Plain DQN checkpoints when the seed and step count match. It trains fresh plain checkpoints for missing runs. [Model inputs and fit](runs/causal/causal_context.json) · [Per-incident results](runs/causal/test_episodes.csv) · [Budget summary](runs/causal/test_summary.csv) · [Validation checkpoints](runs/causal/validation_learning.csv)
+
+## Report 3 · three DQNs train on 90 incidents
+
+All three agents train from scratch on the same 23 RE2 and 67 RE1 incidents used for the 90-incident discovery graph. A query reveals one service's recorded metrics. All agents see the same frontend measurements, service metrics, and availability flags. Graph-guided DQN uses the original topology features computed from the pre-fault traces of those 23 RE2 training incidents. Causal-learn DQN uses the discovery features described above. Each agent trains for 16,000 steps per seed with the same rewards. Validation and holdout reuse the existing 30-case RE2 splits, with query caps of two, four, and five. [Open Report 3](runs/metrics90/report3.html)
+
+| Query cap | Plain DQN top-1 | Graph-guided DQN top-1 | Causal-learn DQN top-1 | Mean queries, plain / graph-guided / causal-learn |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 | 74.4% | 64.4% | 61.1% | 1.64 / 1.53 / 1.67 |
+| 4 | 72.2% | 67.8% | 70.0% | 2.39 / 2.17 / 2.52 |
+| 5 | 77.8% | 73.3% | 70.0% | 2.84 / 2.74 / 2.86 |
+
+With the datasets already downloaded, run this from `experiments_CausalRL`.
+
+```sh
+.venv/bin/python -m re2_investigation.run_causal --metrics-only
+```
+
+[Per-incident results](runs/metrics90/test_episodes.csv) · [Budget summary](runs/metrics90/test_summary.csv) · [Validation checkpoints](runs/metrics90/validation_learning.csv)
