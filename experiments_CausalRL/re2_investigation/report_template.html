@@ -28,9 +28,9 @@
   .causal-weights { margin: 10px 0 0; }
   .start h2 { margin-bottom: 4px; }
   .policy-headings, .step-pair { display: grid; grid-template-columns: repeat(var(--policy-columns),minmax(0,1fr)); gap: 8px 16px; margin: 12px 0; }
-  .policy { border-top: 4px solid #2865a9; }
-  .policy.guided { border-top-color: #087e68; }
-  .policy.topology { border-top-color: #945b19; }
+  .policy { border-top: 4px solid var(--plain-color, #2865a9); }
+  .policy.guided { border-top-color: var(--guided-color, #087e68); }
+  .policy.topology { border-top-color: var(--topology-color, #945b19); }
   .step-card { grid-column: var(--column); grid-row: span 4; display: grid; grid-template-rows: subgrid; align-items: start; }
   .step-heading { grid-row: 1; overflow-wrap: anywhere; }
   .step-question {
@@ -153,8 +153,7 @@ function measurements(rows, name, {headers = ['Signal', 'Before', 'After'], supp
 
 function drawGraph(container) {
   const service = container.dataset.service;
-  const color = container.closest('.topology') ? '#945b19' :
-    container.closest('.guided') ? '#087e68' : '#2865a9';
+  const color = getComputedStyle(container.closest('.policy')).borderTopColor;
   const figure = structuredClone(data.topology || data.graph);
   const points = figure.data[0];
   points.marker.color = points.customdata.map(name => name === service ? color : '#b8c9d1');
@@ -352,6 +351,12 @@ if (data.topology) {
   document.querySelector('main').classList.add('three-policies');
   document.getElementById('start-heading').textContent = 'What all three agents saw at the start';
 }
+if (data.method_colors) {
+  const reportStyle = document.querySelector('main').style;
+  reportStyle.setProperty('--plain-color', data.method_colors['Plain DQN']);
+  reportStyle.setProperty('--topology-color', data.method_colors['Graph-guided DQN']);
+  reportStyle.setProperty('--guided-color', data.method_colors['Causal-learn DQN']);
+}
 const example = ids.find(id => {
   const example = data.cases[id];
   if (data.causal) {
@@ -367,6 +372,15 @@ ui['comparison-mode'].addEventListener('change', render);
 ui.reveal.addEventListener('click', () => { showAnswer = !showAnswer; renderAnswer(); });
 
 const holdout = data.holdout;
+if (data.holdout_chart) {
+  const chart = node('div');
+  chart.id = 'holdout-chart';
+  chart.setAttribute('role', 'img');
+  chart.setAttribute('aria-label', 'Grouped bar chart of holdout accuracy by query cap. Exact values follow in the table.');
+  ui.holdout.append(chart);
+  Plotly.newPlot(chart, data.holdout_chart.data, data.holdout_chart.layout,
+                 {displayModeBar: false, responsive: true});
+}
 const holdoutTable = table(['Maximum queries', ...policyPairs.dqn],
   holdout.rows.map(([cap, ...scores]) => [cap, ...scores.map(score => accuracy.format(score))]),
   'Top-1 holdout accuracy');

@@ -13,6 +13,11 @@ COLORS = {
     "Plain DQN": "#2865a9", "Graph-guided DQN": "#087e68",
 }
 CAUSAL = "Causal-learn DQN"
+REPORT3_COLORS = {
+    "Plain DQN": "#25834d",
+    "Graph-guided DQN": "#f28c28",
+    CAUSAL: "#8154b3",
+}
 
 
 def chart_layout(fig, title, x, y):
@@ -37,6 +42,21 @@ def learning_figure(history, colors=COLORS):
                         hovertemplate="%{x:,} steps · %{y:.0%}<extra>%{fullData.name}</extra>")
     return chart_layout(fig, "Learning on the validation incidents", "Training steps",
                         "Top-1 service accuracy · four-query cap")
+
+
+def holdout_figure(holdout, methods, colors):
+    fig = go.Figure()
+    caps = [str(row[0]) for row in holdout["rows"]]
+    for index, method in enumerate(methods, start=1):
+        scores = [row[index] for row in holdout["rows"]]
+        fig.add_bar(x=caps, y=scores, name=method, marker_color=colors[method],
+                    texttemplate="%{y:.1%}", textposition="outside",
+                    hovertemplate="%{y:.1%} accuracy<extra>%{fullData.name}</extra>")
+    chart_layout(fig, "Root-service accuracy", "Maximum queries per incident", "Top-1 accuracy")
+    fig.update_layout(barmode="group", uniformtext=dict(minsize=11, mode="hide"),
+                      margin=dict(l=58, r=24, t=60, b=96), legend=dict(y=-0.28))
+    fig.update_xaxes(type="category")
+    return fig
 
 
 def graph_figure(edges):
@@ -119,11 +139,14 @@ def causal_graph_figure(graph, edge_strengths=()):
 
 def render_report(directory, history, data):
     report = Path(__file__).with_name("report_template.html").read_text(encoding="utf-8")
-    colors = dict(zip(data["methods"], COLORS.values()))
-    if "topology" in data:
-        colors.update({"Graph-guided DQN": "#945b19", CAUSAL: COLORS["Graph-guided DQN"]})
+    methods = data["methods"]
+    report3 = data.get("report_number") == 3
+    colors = REPORT3_COLORS if report3 else dict(zip(methods, COLORS.values()))
     learning_chart = to_html(learning_figure(history, colors), full_html=False, include_plotlyjs=True,
                              div_id="learning-chart", config={"displayModeBar": False, "responsive": True})
+    if report3:
+        data = {**data, "method_colors": colors,
+                "holdout_chart": holdout_figure(data["holdout"], methods, colors).to_plotly_json()}
     report = report.replace("__LEARNING__", learning_chart)
     report = report.replace("__REPORT_DATA__", json.dumps(data, allow_nan=False).replace("<", "\\u003c"))
     name = {2: "report2.html", 3: "report3.html"}.get(data.get("report_number"), "report.html")
