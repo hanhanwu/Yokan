@@ -1,13 +1,29 @@
 # Causal RL work context
 
-## Completed work
+## Goals
 
-- [RE1 teaching demo](re1_demo/README.md) has a metrics-only investigation and a two-service repair simulator. In the simulator, both faults look identical at first. A controlled repair distinguishes them.
-- [RE2 benchmark](re2_investigation/README.md) compares plain DQN and graph-guided DQN on RCAEval's Online Boutique metrics, logs, and traces. Stable-Baselines3 trains both models from scratch. The 90 incidents are split by repetition into 30 training, 30 validation, and 30 final holdout cases. Training labels supply rewards. Holdout labels are used only for grading.
-- Graph-guided DQN gets direct frontend links and anomaly clues from neighboring services. The graph comes from pre-fault training traces. RE2 queries reveal recorded evidence. Controlled repair outcomes are available in the RE1 simulator.
-- **Holdout top-1 accuracy** for plain vs. graph-guided DQN across three seeds was **67.8% vs. 70.0%** at two queries, **67.8% vs. 65.6%** at four, and **76.7% vs. 71.1%** at six. [Budget summary](re2_investigation/runs/test_summary.csv)
-- [HTML report](re2_investigation/runs/report.html) shows both agents side by side, with the question and evidence above each step's output. Red rows show which measurement most supported the model's suspect in a sensitivity check. [Notebook](re2_investigation/re2_ob_data.ipynb) compares training case OB-054 with holdout case OB-051 and shows example graph edges.
-- [Report 2](re2_investigation/runs/causal/report2.html) replays the original Plain DQN checkpoints against causal-learn DQN. PC used 90 training summaries (23 RE2 and 67 RE1) and found three resource-shift links into Checkout. Both policies use the same RE2 replay setup. Top-1 accuracy for plain vs. causal-learn DQN was **67.8% vs. 56.7%** at two queries, **67.8% vs. 64.4%** at four, and **76.7% vs. 70.0%** at six. The walkthrough shows the predictions as source and destination metrics are revealed. [Method and reproduction](re2_investigation/README.md#report-2--causal-learn-dqn)
-- [Report 3](re2_investigation/runs/metrics90/report3.html) trains Plain DQN, Graph-guided DQN, and Causal-learn DQN from scratch on the same 90 incidents using only metrics queries. It reuses the existing RE2 validation and holdout splits. Top-1 accuracy for plain, graph-guided, and causal-learn DQN was **74.4%, 64.4%, and 61.1%** at two queries, **72.2%, 67.8%, and 70.0%** at four, and **77.8%, 73.3%, and 70.0%** at five. [Method and reproduction](re2_investigation/README.md#report-3--three-dqns-train-on-90-incidents)
+- Use reinforcement learning to choose what to investigate, when to stop, and which service to name as the root cause.
+- Give the agent causal evidence so it can explain why it suspects a service and show how new evidence changes that diagnosis.
+- Compare plain, call-graph-guided, and causal-learn DQNs on the same incidents and query budgets. Test whether limited repair experiments can distinguish plausible causes.
 
-The next experiment of interest is intervention-based RCA with multiple plausible causes and a limited repair-test budget. Generated reports and data live in ignored `runs/` and `data/` directories. Reproduction commands are in the experiment READMEs.
+## Experiments
+
+- **Original benchmark.** Plain DQN and Graph-guided DQN investigated Online Boutique incidents using metrics, logs, and traces. Graph-guided DQN used service connections from pre-fault traces. [Report 1](re2_investigation/runs/report.html)
+- **Report 2.** Plain DQN and Causal-learn DQN used the same 30 RE2 training replays and could query metrics, logs, and traces. The causal graph was fitted separately on 90 incident summaries. Plain DQN led at all three query caps. [Report 2](re2_investigation/runs/causal/report2.html)
+- **Report 3.** All three DQNs trained from scratch on the same 90 incidents (67 RE1 and 23 RE2) with metrics-only queries. Validation and holdout used the existing RE2 splits. The report shows all three agents’ steps, holdout scores, query counts, and validation curves. [Report 3](re2_investigation/runs/metrics90/report3.html)
+
+## Report 3 results
+
+Top-1 root-service accuracy across three seeds on the same 30 holdout incidents.
+
+| Query cap | Plain DQN | Graph-guided DQN | Causal-learn DQN |
+| ---: | ---: | ---: | ---: |
+| 2 | **74.4%** | 64.4% | 61.1% |
+| 4 | **72.2%** | 67.8% | 70.0% |
+| 5 | **77.8%** | 73.3% | 70.0% |
+
+Graph-guided DQN used the fewest queries at every cap (1.53, 2.17, and 2.74 on average).
+
+Causal-learn’s PC algorithm found three links into Checkout from Currency, Product Catalog, and Recommendation. The chart shows estimated strength as a positive number and explains direction separately. The graph fit excluded frontend errors because brief spikes left the before-and-after medians at zero in all 90 incidents.
+
+A future experiment can let the agent spend a limited budget on repair tests, as in the [RE1 simulator](re1_demo/README.md). Reproduction commands are in the [experiment README](re2_investigation/README.md).
