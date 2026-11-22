@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RE2-OB · follow an investigation</title>
+<style>
+  :root { color-scheme: light; font: 16px/1.55 system-ui,sans-serif; color: #172c39; background: #f2f5f5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  main { max-width: 1120px; margin: auto; padding: clamp(16px,4vw,52px); }
+  h1,h2,h3,h4,p { margin: 0; }
+  h1 { font-size: clamp(2rem,5vw,3.3rem); letter-spacing: -.045em; line-height: 1.1; }
+  h2 { font-size: 1.35rem; line-height: 1.25; }
+  h3 { font-size: 1.05rem; }
+  h4 { font-size: 1rem; }
+  .muted, caption { color: #405763; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 24px 0 14px; }
+  label { display: grid; gap: 4px; font-weight: 650; }
+  button, select { font: inherit; min-height: 42px; border: 1px solid #a0b3bc; border-radius: 7px; background: white; color: inherit; padding: 7px 11px; }
+  button, summary { cursor: pointer; }
+  button:hover { background: #eaf1f3; }
+  :focus-visible { outline: 3px solid #2865a9; outline-offset: 3px; }
+  .surface { background: white; border: 1px solid #d6e2e6; border-radius: 12px; padding: clamp(12px,2.5vw,24px); min-width: 0; }
+  .start, .chart-section { margin-top: 16px; }
+  .start h2 { margin-bottom: 4px; }
+  .policy-headings, .step-pair { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 16px; margin: 12px 0; }
+  .policy { border-top: 4px solid #2865a9; }
+  .policy.guided { border-top-color: #087e68; }
+  .step-card { grid-column: var(--column); grid-row: span 4; display: grid; grid-template-rows: subgrid; align-items: start; }
+  .step-heading { grid-row: 1; overflow-wrap: anywhere; }
+  .step-question {
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    background: #f0e8fc;
+    color: #412664;
+  }
+  .step-evidence { grid-row: 2; }
+  .step-graph { grid-row: 3; min-width: 0; }
+  .step-method { display: none; }
+  .step-output { grid-row: 4; }
+  .decision-output { background: #edf3f5; border-radius: 5px; padding: 8px 10px; overflow-wrap: anywhere; }
+  .initial-output > td { border-bottom: 0; padding: 12px 0 0; }
+  .initial-decisions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px 16px; }
+  .verdict { font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: .88rem; }
+  th,td { padding: 5px 4px; border-bottom: 1px solid #e3ebee; text-align: left; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  th[scope=row] { font-weight: 520; }
+  #holdout caption { text-align: left; }
+  #holdout .best-accuracy { font-weight: 650; }
+  .supporting-evidence > * { color: #a2192a; background: #fff0f1; font-weight: 650; }
+  .support-label { display: block; font-size: .78rem; }
+  summary { font-weight: 650; }
+  #answer { border-left: 4px solid #087e68; margin-top: 12px; padding: 8px 12px; background: #e6f3ef; }
+  .small { font-size: .87rem; }
+  @media(max-width: 680px) {
+    .policy-headings, .step-pair, .initial-decisions { grid-template-columns: 1fr; }
+    .step-card { grid-column: 1; grid-row: auto; grid-template-rows: none; row-gap: 8px; }
+    .step-method { display: inline; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Follow a root-cause investigation</h1>
+  <div class="toolbar">
+    <label>Held-out incident <select id="incident"></select></label>
+    <label>Compare <select id="comparison-mode">
+      <option value="dqn">DQN policies</option>
+      <option value="rules">Evidence rules</option>
+    </select></label>
+    <button id="reveal" type="button" aria-expanded="false" aria-controls="answer">Reveal injected root</button>
+  </div>
+  <p id="answer" hidden aria-live="polite"></p>
+  <section class="surface start">
+    <h2>What both agents saw at the start</h2>
+    <div id="initial"></div>
+  </section>
+  <div id="comparison"></div>
+  <section class="surface" id="holdout">
+    <h2>Holdout performance</h2>
+  </section>
+  <section class="surface chart-section">
+    __LEARNING__
+  </section>
+</main>
+<script type="application/json" id="report-data">__REPORT_DATA__</script>
+<script>
+'use strict';
+const data = JSON.parse(document.getElementById('report-data').textContent);
+const ui = Object.fromEntries(['incident','comparison-mode','reveal','answer','initial','comparison','holdout']
+  .map(id => [id, document.getElementById(id)]));
+const policyPairs = {
+  dqn: ['Plain DQN', 'Graph-guided DQN'],
+  rules: ['Evidence rule', 'Evidence rule + graph']
+};
+let showAnswer = false;
+const number = new Intl.NumberFormat('en-US', {maximumFractionDigits: 2});
+const actionScore = new Intl.NumberFormat('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 3});
+const accuracy = new Intl.NumberFormat('en-US', {style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1});
+const faultNames = {cpu: 'CPU', mem: 'Memory', disk: 'Disk', delay: 'Network delay',
+                    loss: 'Packet loss', socket: 'Socket'};
+
+function node(tag, content) {
+  const el = document.createElement(tag);
+  if (content !== undefined) el.textContent = content;
+  return el;
+}
+
+function table(headers, rows, name, support) {
+  const el = node('table');
+  el.setAttribute('aria-label', name);
+  const heading = el.createTHead().insertRow();
+  for (const title of headers) {
+    const cell = node('th', title);
+    cell.scope = 'col';
+    heading.append(cell);
+  }
+  const body = el.createTBody();
+  for (const [label, ...values] of rows) {
+    const row = body.insertRow();
+    const th = node('th', label);
+    th.scope = 'row';
+    row.append(th);
+    for (const value of values) row.insertCell().textContent = value;
+    if (label === support) {
+      row.className = 'supporting-evidence';
+      const marker = node('span', 'Supports suspect');
+      marker.className = 'support-label';
+      marker.title = 'Setting this signal’s change to zero reduced the suspect’s lead the most.';
+      th.append(marker);
+    }
+  }
+  return el;
+}
+
+function measurements(rows, name, {headers = ['Signal', 'Before', 'After'], support} = {}) {
+  return table(headers, rows.map(([label, a, b]) =>
+    [label, number.format(a), number.format(b)]), name, support);
+}
+
+function drawGraph(container) {
+  const service = container.dataset.service;
+  const color = container.closest('.guided') ? '#087e68' : '#2865a9';
+  const figure = structuredClone(data.graph);
+  const points = figure.data[0];
+  points.marker.color = points.customdata.map(name => name === service ? color : '#b8c9d1');
+  points.marker.size = points.customdata.map(name => name === service ? 21 : 16);
+  Plotly.newPlot(container, figure.data, figure.layout,
+                 {displayModeBar: false, responsive: true, scrollZoom: false});
+}
+
+function appendDecision(output, decision) {
+  const next = node('p', 'Next action: ' + decision.action +
+    (decision.score === undefined ? '' : ' (' + actionScore.format(decision.score) + ')'));
+  output.append(next);
+  if (decision.score !== undefined) {
+    const runnerUp = node('p', 'Runner-up: ' + decision.alternative + ' (' +
+      actionScore.format(decision.alternative_score) + ')');
+    runnerUp.className = 'muted';
+    next.title = runnerUp.title = 'Scores estimate total reward using the evidence available at this point.';
+    output.append(runnerUp);
+  } else if (decision.rule_basis) {
+    const basis = node('p', decision.rule_basis);
+    basis.className = 'muted';
+    output.append(basis);
+  }
+}
+
+function stepItem(name, column, step, number, answer, nextDecision) {
+  const card = node('section');
+  card.className = 'surface policy step-card' + (column === 2 ? ' guided' : '');
+  card.style.setProperty('--column', column);
+  const heading = node('div');
+  heading.className = 'step-heading';
+  const stepLabel = node('p', 'Step ' + number);
+  stepLabel.className = 'muted small';
+  const method = node('span', ' · ' + name);
+  method.className = 'step-method';
+  stepLabel.append(method);
+  heading.append(stepLabel, node('h3', step.action + (step.service ? ' · ' + step.service : '')));
+  const question = node('p', step.decision.question);
+  question.className = 'step-question';
+  heading.append(question);
+  card.append(heading);
+  const output = node('footer');
+  output.className = 'decision-output step-output small';
+  output.append(node('h4', 'Output after Step ' + number));
+  if (step.service) {
+    const evidence = node('div');
+    evidence.className = 'step-evidence';
+    evidence.append(step.rows.length
+      ? measurements(step.rows, step.action + ' for ' + step.service, {support: step.support})
+      : node('p', 'This query returned no usable measurements.'));
+    const graph = node('div');
+    graph.className = 'step-graph';
+    graph.dataset.service = step.service;
+    graph.setAttribute('role', 'group');
+    graph.setAttribute('aria-label', 'Service call graph highlighting ' + step.service);
+    const suspect = step.before === step.after
+      ? 'Still suspects ' + step.after
+      : 'Suspect changed from ' + step.before + ' to ' + step.after;
+    output.append(node('p', suspect));
+    appendDecision(output, nextDecision);
+    card.append(evidence, graph);
+  } else {
+    output.append(node('p', step.after ? 'Submitted ' + step.after + '.' : 'No diagnosis submitted.'));
+    if (step.after) {
+      const verdict = node('p', step.after === answer.service ? 'Correct service.' : 'Incorrect service.');
+      verdict.className = 'verdict';
+      verdict.hidden = true;
+      output.append(verdict);
+    }
+  }
+  card.append(output);
+  return card;
+}
+
+function policyHeading(name, index) {
+  const panel = node('section');
+  panel.className = 'surface policy' + (index === 1 ? ' guided' : '');
+  panel.append(node('h2', name));
+  return panel;
+}
+
+function startingTable(record, policies) {
+  const table = measurements(record.frontend, 'Frontend starting measurements', {
+    headers: ['Frontend metric (median)', '2 minutes before fault injection', 'First 2 minutes after fault injection']
+  });
+  const footer = table.createTFoot();
+  const row = footer.insertRow();
+  row.className = 'initial-output';
+  const cell = row.insertCell();
+  cell.colSpan = 3;
+  const decisions = node('div');
+  decisions.className = 'initial-decisions';
+  for (const [name, policy] of policies) {
+    const output = node('div');
+    output.className = 'decision-output';
+    output.append(node('h4', name), node('p', 'Leading suspect: ' + policy.initial));
+    appendDecision(output, policy.steps[0].decision);
+    decisions.append(output);
+  }
+  cell.append(node('h3', 'Output before Step 1'), decisions);
+  return table;
+}
+
+function renderAnswer() {
+  const answer = data.cases[ui.incident.value].answer;
+  ui.answer.hidden = !showAnswer;
+  ui.answer.textContent = showAnswer
+    ? 'Injected root: ' + answer.service + ' · ' + (faultNames[answer.fault] || answer.fault)
+    : '';
+  ui.reveal.textContent = showAnswer ? 'Hide injected root' : 'Reveal injected root';
+  ui.reveal.setAttribute('aria-expanded', String(showAnswer));
+  for (const verdict of ui.comparison.querySelectorAll('.verdict')) verdict.hidden = !showAnswer;
+}
+
+function render() {
+  const record = data.cases[ui.incident.value];
+  const policies = policyPairs[ui['comparison-mode'].value].map(name => [name, record.policies[name]]);
+  const headings = node('div');
+  headings.className = 'policy-headings';
+  for (const [index, [name]] of policies.entries()) {
+    headings.append(policyHeading(name, index));
+  }
+  const pairs = [headings];
+  const count = Math.max(...policies.map(([, policy]) => policy.steps.length));
+  for (let i = 0; i < count; i++) {
+    const pair = node('div');
+    pair.className = 'step-pair';
+    for (const [index, [name, policy]] of policies.entries()) {
+      if (policy.steps[i]) {
+        pair.append(stepItem(name, index + 1, policy.steps[i], i + 1, record.answer,
+                             policy.steps[i + 1]?.decision));
+      }
+    }
+    pairs.push(pair);
+  }
+  for (const graph of ui.comparison.querySelectorAll('.step-graph')) Plotly.purge(graph);
+  ui.initial.replaceChildren(startingTable(record, policies));
+  ui.comparison.replaceChildren(...pairs);
+  renderAnswer();
+  for (const graph of ui.comparison.querySelectorAll('.step-graph')) drawGraph(graph);
+}
+
+const ids = Object.keys(data.cases);
+ui.incident.replaceChildren(...ids.map(id => new Option(id, id)));
+const example = ids.find(id => {
+  const example = data.cases[id];
+  const [plain, guided] = policyPairs.dqn.map(name => example.policies[name]);
+  return guided.guess === example.answer.service && plain.guess !== example.answer.service;
+});
+ui.incident.value = example || ids[0];
+ui.incident.addEventListener('change', () => { showAnswer = false; render(); });
+ui['comparison-mode'].addEventListener('change', render);
+ui.reveal.addEventListener('click', () => { showAnswer = !showAnswer; renderAnswer(); });
+
+const holdout = data.holdout;
+const holdoutTable = table(['Maximum queries', ...policyPairs.dqn],
+  holdout.rows.map(([cap, plain, guided]) => [cap, accuracy.format(plain), accuracy.format(guided)]),
+  'Top-1 holdout accuracy');
+const seedLabel = holdout.seeds === 1 ? '1 training seed' : holdout.seeds + ' training seeds';
+holdoutTable.createCaption().textContent = 'Top-1 root-service accuracy across all ' + holdout.incidents +
+  ' holdout incidents · ' + seedLabel;
+for (const [index, [, plain, guided]] of holdout.rows.entries()) {
+  if (plain !== guided) {
+    holdoutTable.tBodies[0].rows[index].cells[plain > guided ? 1 : 2].className = 'best-accuracy';
+  }
+}
+ui.holdout.append(holdoutTable);
+render();
+</script>
+</body>
+</html>
